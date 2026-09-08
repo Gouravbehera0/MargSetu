@@ -7,7 +7,7 @@ interface AuthUser {
   id: string;
   email: string;
   name: string;
-  phone: string;
+  phone?: string;
   role: Role;
   vehicleType?: EmergencyServiceType;
   vehicleCode?: string;
@@ -30,6 +30,10 @@ interface AppState {
   alerts: AlertItem[];
   activeRoute: NavigationRoute | null;
   toasts: ToastMessage[];
+  isGlobalLoading: boolean;
+  globalLoadingMessage?: string;
+  showGlobalLoader: (message?: string, durationMs?: number) => void;
+  hideGlobalLoader: () => void;
   setRole: (role: Role) => void;
   setServiceType: (type: EmergencyServiceType) => void;
   login: () => void;
@@ -47,14 +51,55 @@ interface AppState {
 const AppContext = createContext<AppState | null>(null);
 
 export function AppProvider({ children }: { children: ReactNode }) {
-  const [user, setUser] = useState<AuthUser | null>(null);
-  const [role, setRoleState] = useState<Role | null>(null);
+  const [user, setUserState] = useState<AuthUser | null>(() => {
+    try {
+      const stored = localStorage.getItem('margsetu_user');
+      return stored ? JSON.parse(stored) : null;
+    } catch {
+      return null;
+    }
+  });
+  const [role, setRoleState] = useState<Role | null>(() => {
+    try {
+      const stored = localStorage.getItem('margsetu_user');
+      return stored ? JSON.parse(stored).role : null;
+    } catch {
+      return null;
+    }
+  });
+
+  const setUser = useCallback((u: AuthUser | null) => {
+    setUserState(u);
+    if (u) {
+      localStorage.setItem('margsetu_user', JSON.stringify(u));
+      if (u.role) setRoleState(u.role);
+    } else {
+      localStorage.removeItem('margsetu_user');
+      setRoleState(null);
+    }
+  }, []);
   const [serviceType, setServiceTypeState] = useState<EmergencyServiceType | null>(null);
   const [authLoading, setAuthLoading] = useState(true);
   const [currentRequest, setCurrentRequest] = useState<EmergencyRequest | null>(null);
   const [alerts, setAlerts] = useState<AlertItem[]>([]);
   const [activeRoute, setActiveRouteState] = useState<NavigationRoute | null>(null);
   const [toasts, setToasts] = useState<ToastMessage[]>([]);
+  const [isGlobalLoading, setIsGlobalLoading] = useState(false);
+  const [globalLoadingMessage, setGlobalLoadingMessage] = useState('MargSetu Swarm Engine Initializing...');
+
+  const showGlobalLoader = useCallback((message?: string, durationMs?: number) => {
+    if (message) setGlobalLoadingMessage(message);
+    setIsGlobalLoading(true);
+    if (durationMs && durationMs > 0) {
+      setTimeout(() => {
+        setIsGlobalLoading(false);
+      }, durationMs);
+    }
+  }, []);
+
+  const hideGlobalLoader = useCallback(() => {
+    setIsGlobalLoading(false);
+  }, []);
 
   const isAuth = !!user;
 
@@ -163,14 +208,17 @@ export function AppProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const logout = useCallback(async () => {
-    await supabase.auth.signOut();
+    try {
+      await supabase.auth.signOut();
+    } catch {}
     setUser(null);
     setRoleState(null);
     setServiceTypeState(null);
     setCurrentRequest(null);
     setActiveRouteState(null);
     setAlerts([]);
-  }, []);
+    localStorage.removeItem('margsetu_user');
+  }, [setUser]);
 
   const createRequest = useCallback((req: EmergencyRequest) => {
     setCurrentRequest(req);
@@ -239,6 +287,10 @@ export function AppProvider({ children }: { children: ReactNode }) {
         setActiveRoute,
         showToast,
         dismissToast,
+        isGlobalLoading,
+        globalLoadingMessage,
+        showGlobalLoader,
+        hideGlobalLoader,
       }}
     >
       {children}

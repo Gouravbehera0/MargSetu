@@ -1,4 +1,4 @@
-export type Role = 'citizen' | 'vehicle';
+export type Role = 'citizen' | 'vehicle' | 'admin';
 
 export type EmergencyServiceType = 'ambulance' | 'fire' | 'police';
 
@@ -185,3 +185,124 @@ export interface NavigationTrafficSegment {
   level: TrafficLevel;
   position: RouteCoordinate;
 }
+
+// -------------------------------------------------------------
+// MARGSETU - General Transportation & QPSO Intelligent Routing Types
+// -------------------------------------------------------------
+
+export type GeneralVehicleType =
+  | 'car'
+  | 'bike'
+  | 'bus'
+  | 'truck'
+  | 'taxi'
+  | 'delivery'
+  | 'ambulance'
+  | 'fire'
+  | 'police';
+
+export type RoutePreference =
+  | 'fastest'
+  | 'shortest'
+  | 'safest'
+  | 'low_traffic'
+  | 'eco'
+  | 'balanced'
+  | 'emergency';
+
+export interface GeoPoint {
+  lat: float_number;
+  lng: float_number;
+  name?: string;
+}
+
+type float_number = number;
+
+export interface OptimizationWeights {
+  w1_time: number;
+  w2_congestion: number;
+  w3_distance: number;
+  w4_risk: number;
+  w5_blockage: number;
+}
+
+export interface FitnessExplanation {
+  time_contribution: number;
+  congestion_contribution: number;
+  distance_contribution: number;
+  risk_contribution: number;
+  blockage_contribution: number;
+  total_fitness: number;
+  explanation_text: string;
+}
+
+export interface RouteCandidateAlternative {
+  id: string;
+  name: string;
+  distance_km: number;
+  travel_time_min: number;
+  traffic_score: number;
+  risk_score: number;
+  blockage_score: number;
+  composite_fitness: number;
+  coordinates: [number, number][];
+}
+
+export interface QPSOOptimizationResult {
+  algorithm: string;
+  route_id: string;
+  route_name: string;
+  origin: GeoPoint;
+  destination: GeoPoint;
+  distance_km: number;
+  eta_minutes: number;
+  fitness: number;
+  traffic_score: number;
+  risk_score: number;
+  blockage_score: number;
+  iterations: number;
+  computation_time_ms: number;
+  convergence_history: number[];
+  weights_used: OptimizationWeights;
+  explainability: FitnessExplanation;
+  path_nodes: string[];
+  route_geometry: [number, number][];
+  candidate_alternatives: RouteCandidateAlternative[];
+  vehicle_type: GeneralVehicleType;
+  is_emergency: boolean;
+}
+
+export interface BenchmarkResultItem {
+  algorithm: string;
+  fitness: number;
+  travel_time_min: number;
+  distance_km: number;
+  computation_time_ms: number;
+  iterations: number;
+  convergence_history: number[];
+  route_valid: boolean;
+  path: string[];
+}
+
+export interface IncidentRecord {
+  id: string;
+  type: 'accident' | 'roadblock' | 'construction' | 'fire' | 'weather';
+  description: string;
+  location: GeoPoint;
+  affected_nodes: string[];
+  severity: 'info' | 'warning' | 'critical';
+  reported_at: string;
+  active: boolean;
+}
+
+export interface CitizenGiveWayAlertItem {
+  id: string;
+  citizen_id: string;
+  emergency_vehicle_code: string;
+  emergency_vehicle_type: GeneralVehicleType;
+  distance_meters: number;
+  message: string;
+  severity: string;
+  timestamp: string;
+}
+

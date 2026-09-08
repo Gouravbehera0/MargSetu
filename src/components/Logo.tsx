@@ -1,4 +1,4 @@
-import { ShieldPlus } from 'lucide-react';
+import margSetuLogo from '@/assets/margsetu_app_logo.png';
 
 interface LogoProps {
   size?: 'sm' | 'md' | 'lg';
@@ -8,28 +8,38 @@ interface LogoProps {
 
 export default function Logo({ size = 'md', showText = true, variant = 'dark' }: LogoProps) {
   const sizes = {
-    sm: { icon: 28, text: 'text-lg' },
-    md: { icon: 40, text: 'text-2xl' },
-    lg: { icon: 64, text: 'text-4xl' },
+    sm: { box: 36, text: 'text-base', sub: 'text-[9px]' },
+    md: { box: 48, text: 'text-2xl', sub: 'text-[11px]' },
+    lg: { box: 64, text: 'text-3xl', sub: 'text-xs' },
   };
 
   const s = sizes[size];
 
   return (
-    <div className="flex items-center gap-2.5">
-      <div
-        className="relative flex items-center justify-center rounded-2xl bg-gradient-to-br from-emergency-500 to-emergency-600 shadow-lg"
-        style={{ width: s.icon + 8, height: s.icon + 8 }}
-      >
-        <ShieldPlus size={s.icon} className="text-white" strokeWidth={2.5} />
-      </div>
+    <div className="flex items-center gap-3 select-none">
+      <img
+        src={margSetuLogo}
+        alt="MargSetu Logo"
+        className="rounded-2xl object-contain shadow-md shadow-cyan-500/20 shrink-0 hover:scale-105 transition-transform"
+        style={{ width: s.box, height: s.box }}
+      />
       {showText && (
-        <div className="flex flex-col leading-none">
-          <span className={`${s.text} font-extrabold tracking-tight ${variant === 'light' ? 'text-white' : 'text-navy-800'}`}>
-            Emergency
+        <div className="flex flex-col leading-tight">
+          <span
+            className={`${s.text} font-black tracking-wider ${
+              variant === 'light'
+                ? 'bg-clip-text text-transparent bg-gradient-to-r from-white via-blue-100 to-cyan-200'
+                : 'text-slate-900'
+            }`}
+          >
+            MARGSETU
           </span>
-          <span className={`${s.text} font-extrabold tracking-tight -mt-0.5 ${variant === 'light' ? 'text-emergency-400' : 'text-emergency-500'}`}>
-            Connect
+          <span
+            className={`${s.sub} font-medium tracking-tight ${
+              variant === 'light' ? 'text-slate-400' : 'text-slate-500'
+            }`}
+          >
+            One Platform. Smarter Routes. Safer Roads.
           </span>
         </div>
       )}
