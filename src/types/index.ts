@@ -304,5 +304,31 @@ export interface CitizenGiveWayAlertItem {
   message: string;
   severity: string;
   timestamp: string;
+  ambulance_location?: GeoPoint;
+  heading_degrees?: number;
+  heading_direction?: string;
+  speed_kmh?: number;
+  active_route_geometry?: [number, number][];
+  eta_seconds?: number;
+  is_approaching?: boolean;
 }
+
+export interface ActiveAmbulanceAlertData {
+  has_active_ambulance: boolean;
+  is_relevant_to_user: boolean;
+  vehicle_id?: string;
+  vehicle_code?: string;
+  vehicle_type?: string;
+  ambulance_location?: GeoPoint;
+  heading_degrees: number;
+  heading_direction: string;
+  speed_kmh: number;
+  distance_meters: number;
+  eta_seconds: number;
+  active_route_geometry: [number, number][];
+  message: string;
+  give_way_action: string;
+  is_approaching: boolean;
+}
+
 

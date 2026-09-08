@@ -2,7 +2,8 @@ import { useState, useEffect } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import NavigationNavbar from '@/components/NavigationNavbar';
 import LeafletMap from '@/components/LeafletMap';
-import type { GeoPoint, GeneralVehicleType } from '@/types';
+import { fetchActiveAmbulanceAlert } from '@/services/apiService';
+import type { GeoPoint, GeneralVehicleType, ActiveAmbulanceAlertData } from '@/types';
 import {
   Navigation,
   ArrowUp,
@@ -17,8 +18,10 @@ import {
   Sparkles,
   TrendingDown,
   Compass,
-  Gauge
+  Gauge,
+  Siren
 } from 'lucide-react';
+
 
 interface TurnStep {
   id: string;
@@ -69,6 +72,11 @@ export default function NavigationHUDPage() {
     newEta: Math.max(1, Math.round(initialEta * 0.7)),
     timeSaved: Math.max(2, Math.round(initialEta * 0.3))
   });
+
+  // Real-time Active Ambulance Proximity Alert state
+  const [activeAmbulance, setActiveAmbulance] = useState<ActiveAmbulanceAlertData | null>(null);
+  const [giveWayAcknowledged, setGiveWayAcknowledged] = useState(false);
+
 
   // Dynamic turn-by-turn guidance steps contextual to origin and destination
   const originLabel = origin.name ? origin.name.split(',')[0] : 'Origin Point';
@@ -162,6 +170,29 @@ export default function NavigationHUDPage() {
     return () => clearTimeout(rerouteTimer);
   }, []);
 
+  // Poll for active emergency ambulance on or approaching user's corridor
+  useEffect(() => {
+    let isMounted = true;
+    const pollAmbulanceAlert = async () => {
+      try {
+        const userLoc = vehicleLocation;
+        const alert = await fetchActiveAmbulanceAlert(userLoc.lat, userLoc.lng, 1200);
+        if (isMounted) {
+          setActiveAmbulance(alert);
+        }
+      } catch (e) {
+        console.error('Failed to poll ambulance alert:', e);
+      }
+    };
+
+    pollAmbulanceAlert();
+    const interval = setInterval(pollAmbulanceAlert, 2000);
+    return () => {
+      isMounted = false;
+      clearInterval(interval);
+    };
+  }, [vehicleLocation.lat, vehicleLocation.lng]);
+
   function handleAcceptReroute() {
     setEtaMinutes(rerouteAlert.newEta);
     setRemainingDistanceKm((prev) => Math.max(0.8, Number((prev * 0.85).toFixed(1))));
@@ -179,6 +210,78 @@ export default function NavigationHUDPage() {
       <NavigationNavbar />
 
       <main className="flex-1 max-w-7xl w-full mx-auto p-4 sm:p-6 flex flex-col space-y-4">
+        {/* Real-Time Active Ambulance Give-Way Alert Banner */}
+        {activeAmbulance && activeAmbulance.has_active_ambulance && activeAmbulance.is_relevant_to_user && !giveWayAcknowledged && (
+          <div className="bg-gradient-to-r from-red-600 via-rose-600 to-red-700 rounded-2xl p-4 sm:p-5 shadow-2xl border-2 border-red-400 animate-pulse flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 text-white">
+            <div className="flex items-center space-x-3.5">
+              <div className="p-3 bg-white/20 rounded-2xl shadow-inner relative flex-shrink-0">
+                <Siren className="w-7 h-7 text-white animate-bounce" />
+                <span className="absolute -top-1 -right-1 w-3.5 h-3.5 bg-yellow-400 rounded-full animate-ping" />
+              </div>
+              <div>
+                <div className="flex items-center space-x-2 flex-wrap">
+                  <span className="font-black text-sm sm:text-base tracking-wide uppercase bg-red-800/60 px-2.5 py-0.5 rounded-lg border border-red-400/40">
+                    🚨 GIVE WAY ALERT • {activeAmbulance.vehicle_code || 'AMBULANCE'}
+                  </span>
+                  <span className="text-[11px] font-bold bg-white/20 px-2 py-0.5 rounded-full text-yellow-200">
+                    Corridor Active
+                  </span>
+                </div>
+                <p className="text-xs sm:text-sm text-red-100 font-semibold mt-1">
+                  {activeAmbulance.give_way_action || 'Emergency vehicle approaching on your corridor. Please move left and give way immediately.'}
+                </p>
+                <div className="flex flex-wrap items-center gap-2 mt-2 text-xs font-bold">
+                  <span className="bg-red-950/70 border border-red-400/40 px-2.5 py-1 rounded-lg text-white">
+                    📏 Distance: <span className="text-yellow-300">{activeAmbulance.distance_meters} m</span>
+                  </span>
+                  <span className="bg-red-950/70 border border-red-400/40 px-2.5 py-1 rounded-lg text-white">
+                    ⏱️ ETA: <span className="text-emerald-300">{activeAmbulance.eta_seconds} sec</span>
+                  </span>
+                  <span className="bg-red-950/70 border border-red-400/40 px-2.5 py-1 rounded-lg text-white flex items-center gap-1.5">
+                    <span>🧭 Heading: {activeAmbulance.heading_direction} ({activeAmbulance.heading_degrees}°)</span>
+                    <span
+                      className="inline-block transition-transform duration-300 text-yellow-400 font-black text-sm"
+                      style={{ transform: `rotate(${activeAmbulance.heading_degrees}deg)` }}
+                    >
+                      ↑
+                    </span>
+                  </span>
+                  <span className="bg-red-950/70 border border-red-400/40 px-2.5 py-1 rounded-lg text-white">
+                    ⚡ Speed: {activeAmbulance.speed_kmh} km/h
+                  </span>
+                </div>
+              </div>
+            </div>
+
+            <div className="flex items-center space-x-2 w-full sm:w-auto">
+              <button
+                onClick={() => setGiveWayAcknowledged(true)}
+                className="flex-1 sm:flex-initial bg-white hover:bg-red-50 text-red-700 font-extrabold px-4 py-2.5 rounded-xl text-xs shadow-lg transition-all active:scale-95 whitespace-nowrap"
+              >
+                Acknowledge & Clear Lane
+              </button>
+            </div>
+          </div>
+        )}
+
+        {/* Compact Give-Way status pill if acknowledged */}
+        {activeAmbulance && activeAmbulance.has_active_ambulance && activeAmbulance.is_relevant_to_user && giveWayAcknowledged && (
+          <div className="bg-red-950/80 border border-red-600/50 text-red-200 text-xs px-4 py-2.5 rounded-xl flex items-center justify-between shadow-md">
+            <div className="flex items-center space-x-2">
+              <Siren className="w-4 h-4 text-red-400 animate-pulse" />
+              <span>
+                Clearway active for <b>{activeAmbulance.vehicle_code}</b> • <b>{activeAmbulance.distance_meters}m away</b> (ETA: <b>{activeAmbulance.eta_seconds}s</b> • Heading: <b>{activeAmbulance.heading_direction}</b>)
+              </span>
+            </div>
+            <button
+              onClick={() => setGiveWayAcknowledged(false)}
+              className="text-[11px] font-bold text-red-300 hover:text-white underline ml-2"
+            >
+              Reopen Alert
+            </button>
+          </div>
+        )}
+
         {/* Dynamic Reroute Toast / Modal */}
         {rerouteAlert.active && (
           <div className="bg-gradient-to-r from-emerald-600 to-teal-700 rounded-2xl p-4 sm:p-5 shadow-2xl border-2 border-emerald-400 animate-bounceOnce flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
@@ -274,6 +377,7 @@ export default function NavigationHUDPage() {
             primaryRoute={routeCoordinates}
             vehicleLocation={vehicleLocation}
             vehicleType={vehicleType}
+            activeAmbulanceAlert={activeAmbulance}
             className="w-full h-full min-h-[420px]"
           />
 

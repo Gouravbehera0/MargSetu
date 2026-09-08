@@ -1,9 +1,9 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import NavigationNavbar from '@/components/NavigationNavbar';
 import LeafletMap from '@/components/LeafletMap';
-import { checkCitizenGiveWayAlerts } from '@/services/apiService';
-import type { CitizenGiveWayAlertItem } from '@/types';
+import { checkCitizenGiveWayAlerts, fetchActiveAmbulanceAlert, stepEmergencyVehicle } from '@/services/apiService';
+import type { CitizenGiveWayAlertItem, ActiveAmbulanceAlertData } from '@/types';
 import {
   Siren,
   Flame,
@@ -15,8 +15,13 @@ import {
   CheckCircle2,
   BellRing,
   ArrowRight,
-  Sparkles
+  Sparkles,
+  Play,
+  Pause,
+  FastForward,
+  Compass
 } from 'lucide-react';
+
 
 export default function EmergencyCommandPage() {
   const navigate = useNavigate();
@@ -25,6 +30,8 @@ export default function EmergencyCommandPage() {
   const [alertRadius, setAlertRadius] = useState<number>(600);
   const [giveWayAlerts, setGiveWayAlerts] = useState<CitizenGiveWayAlertItem[]>([]);
   const [isBroadcasting, setIsBroadcasting] = useState(false);
+  const [activeAmbulance, setActiveAmbulance] = useState<ActiveAmbulanceAlertData | null>(null);
+  const [isAutoStepping, setIsAutoStepping] = useState(true);
 
   // Active emergency vehicle trajectory
   const emergencyRoute: [number, number][] = [
@@ -41,6 +48,37 @@ export default function EmergencyCommandPage() {
     { id: 'c3', lat: 20.2980, lng: 85.8420, label: 'Citizen Sunita (Outside corridor)' }
   ];
 
+  const refreshAmbulanceTelemetry = async () => {
+    try {
+      const data = await fetchActiveAmbulanceAlert(20.2740, 85.8300, alertRadius);
+      setActiveAmbulance(data);
+    } catch (e) {
+      console.error(e);
+    }
+  };
+
+  useEffect(() => {
+    refreshAmbulanceTelemetry();
+    const interval = setInterval(refreshAmbulanceTelemetry, 2500);
+    return () => clearInterval(interval);
+  }, [alertRadius]);
+
+  // Auto-step simulation timer
+  useEffect(() => {
+    if (!isAutoStepping) return;
+    const timer = setInterval(async () => {
+      await stepEmergencyVehicle('ev-1');
+      refreshAmbulanceTelemetry();
+    }, 4000);
+    return () => clearInterval(timer);
+  }, [isAutoStepping, alertRadius]);
+
+  async function handleStepForward() {
+    await stepEmergencyVehicle('ev-1');
+    await refreshAmbulanceTelemetry();
+    handleTriggerBroadcast();
+  }
+
   async function handleTriggerBroadcast() {
     setIsBroadcasting(true);
     try {
@@ -52,6 +90,7 @@ export default function EmergencyCommandPage() {
       setIsBroadcasting(false);
     }
   }
+
 
   return (
     <div className="min-h-screen bg-slate-50 flex flex-col font-sans">
@@ -222,25 +261,64 @@ export default function EmergencyCommandPage() {
             </div>
           </div>
 
-          {/* Right: Map with Pulsing Proximity Radar */}
+          {/* Right: Map with Pulsing Proximity Radar & Real-Time Ambulance Marker */}
           <div className="lg:col-span-7 bg-white rounded-2xl p-4 border border-slate-200 shadow-sm min-h-[520px] flex flex-col">
-            <div className="flex items-center justify-between mb-3">
+            <div className="flex flex-wrap items-center justify-between gap-2 mb-3">
               <div className="flex items-center space-x-2 text-xs font-bold text-slate-800">
-                <Siren className="w-4 h-4 text-red-600" />
-                <span>Live Corridor Navigation & Give-Way Circle</span>
+                <Siren className="w-4 h-4 text-red-600 animate-pulse" />
+                <span>Live Corridor Navigation & Shared Emergency Route</span>
               </div>
-              <span className="text-[11px] bg-red-100 text-red-700 font-bold px-2 py-0.5 rounded-full">
-                Radar: {alertRadius}m
-              </span>
+              <div className="flex items-center space-x-2">
+                {activeAmbulance && (
+                  <div className="flex items-center space-x-2 text-[11px] bg-slate-100 border border-slate-200 px-2 py-1 rounded-lg">
+                    <span className="text-slate-500 font-semibold">Heading:</span>
+                    <span className="font-bold text-slate-800 flex items-center gap-1">
+                      {activeAmbulance.heading_direction} ({activeAmbulance.heading_degrees}°)
+                      <span
+                        className="inline-block text-red-600 font-black"
+                        style={{ transform: `rotate(${activeAmbulance.heading_degrees}deg)` }}
+                      >
+                        ↑
+                      </span>
+                    </span>
+                    <span className="text-slate-300">|</span>
+                    <span className="font-bold text-emerald-600">{activeAmbulance.speed_kmh} km/h</span>
+                  </div>
+                )}
+                <button
+                  onClick={handleStepForward}
+                  title="Simulate ambulance next waypoint movement"
+                  className="flex items-center space-x-1 bg-red-50 hover:bg-red-100 text-red-700 text-xs font-bold px-2.5 py-1 rounded-lg border border-red-200 transition-colors"
+                >
+                  <FastForward className="w-3.5 h-3.5" />
+                  <span>Step</span>
+                </button>
+                <button
+                  onClick={() => setIsAutoStepping(!isAutoStepping)}
+                  title={isAutoStepping ? 'Pause auto movement' : 'Start auto movement'}
+                  className={`flex items-center space-x-1 text-xs font-bold px-2.5 py-1 rounded-lg border transition-colors ${
+                    isAutoStepping
+                      ? 'bg-emerald-50 hover:bg-emerald-100 text-emerald-700 border-emerald-200'
+                      : 'bg-slate-50 hover:bg-slate-100 text-slate-700 border-slate-200'
+                  }`}
+                >
+                  {isAutoStepping ? <Pause className="w-3.5 h-3.5" /> : <Play className="w-3.5 h-3.5" />}
+                  <span>{isAutoStepping ? 'Auto-Step' : 'Paused'}</span>
+                </button>
+                <span className="text-[11px] bg-red-100 text-red-700 font-bold px-2 py-0.5 rounded-full">
+                  Radar: {alertRadius}m
+                </span>
+              </div>
             </div>
 
             <div className="flex-1 w-full h-[480px] rounded-xl overflow-hidden relative">
               <LeafletMap
                 origin={{ lat: 20.2720, lng: 85.8280, name: 'Ambulance Current Pos' }}
                 destination={{ lat: 20.3120, lng: 85.8180, name: 'AIIMS Hospital' }}
-                primaryRoute={emergencyRoute}
-                vehicleLocation={{ lat: 20.2720, lng: 85.8280, name: 'AMB-108' }}
+                primaryRoute={activeAmbulance?.active_route_geometry || emergencyRoute}
+                vehicleLocation={activeAmbulance?.ambulance_location || { lat: 20.2720, lng: 85.8280, name: 'AMB-108' }}
                 vehicleType="ambulance"
+                activeAmbulanceAlert={activeAmbulance}
                 showEmergencyRadius={true}
                 alertRadiusMeters={alertRadius}
                 citizens={simulatedCitizens}

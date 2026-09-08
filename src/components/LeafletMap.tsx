@@ -1,6 +1,6 @@
 import React, { useEffect, useRef } from 'react';
 import L from 'leaflet';
-import type { GeoPoint, GeneralVehicleType } from '@/types';
+import type { GeoPoint, GeneralVehicleType, ActiveAmbulanceAlertData } from '@/types';
 
 interface LeafletMapProps {
   origin?: GeoPoint | null;
@@ -9,6 +9,7 @@ interface LeafletMapProps {
   alternativeRoutes?: [number, number][][];
   vehicleLocation?: GeoPoint | null;
   vehicleType?: GeneralVehicleType;
+  activeAmbulanceAlert?: ActiveAmbulanceAlertData | null;
   incidents?: Array<{ id: string; lat: number; lng: number; label: string; type: string }>;
   citizens?: Array<{ id: string; lat: number; lng: number; label: string }>;
   alertRadiusMeters?: number;
@@ -27,6 +28,7 @@ export default function LeafletMap({
   alternativeRoutes = [],
   vehicleLocation,
   vehicleType = 'car',
+  activeAmbulanceAlert,
   incidents = [],
   citizens = [],
   alertRadiusMeters = 500,
@@ -37,6 +39,7 @@ export default function LeafletMap({
   onMapClick,
   onSelectAlternative
 }: LeafletMapProps) {
+
   const mapContainerRef = useRef<HTMLDivElement>(null);
   const mapInstanceRef = useRef<L.Map | null>(null);
   const layerGroupRef = useRef<L.LayerGroup | null>(null);
@@ -297,6 +300,121 @@ export default function LeafletMap({
       layers.addLayer(citMarker);
     });
 
+    // 8. Render Active Ambulance Emergency Clearway Corridor, Direction Arrow, Moving Marker & ETA
+    if (activeAmbulanceAlert && activeAmbulanceAlert.has_active_ambulance) {
+      const ambRoute = activeAmbulanceAlert.active_route_geometry;
+      if (ambRoute && ambRoute.length >= 2) {
+        // Outer glowing red aura
+        const glowPoly = L.polyline(ambRoute, {
+          color: '#ef4444',
+          weight: 12,
+          opacity: 0.38,
+          lineCap: 'round',
+          lineJoin: 'round'
+        });
+        layers.addLayer(glowPoly);
+
+        // Core emergency clearway line
+        const corePoly = L.polyline(ambRoute, {
+          color: '#dc2626',
+          weight: 5,
+          opacity: 0.92,
+          lineCap: 'round',
+          lineJoin: 'round'
+        });
+        layers.addLayer(corePoly);
+
+        // Inner dashed white line for clearway distinction
+        const stripePoly = L.polyline(ambRoute, {
+          color: '#ffffff',
+          weight: 2,
+          opacity: 0.95,
+          dashArray: '6, 8',
+          lineCap: 'round'
+        }).bindPopup(`
+          <div class="p-1 font-sans text-xs">
+            <strong style="color: #dc2626;">🚨 Emergency Clearway Corridor</strong>
+            <p class="text-slate-600 text-[11px] mt-0.5">Active priority route for <b>${activeAmbulanceAlert.vehicle_code || 'AMB-108'}</b></p>
+          </div>
+        `);
+        layers.addLayer(stripePoly);
+      }
+
+      // Moving Ambulance Marker with Direction Arrow and Distance / ETA Tag
+      if (activeAmbulanceAlert.ambulance_location) {
+        const ambLoc = activeAmbulanceAlert.ambulance_location;
+        const heading = activeAmbulanceAlert.heading_degrees || 0;
+        const code = activeAmbulanceAlert.vehicle_code || 'AMB-108';
+        const speed = activeAmbulanceAlert.speed_kmh || 70;
+        const dist = activeAmbulanceAlert.distance_meters || 0;
+        const eta = activeAmbulanceAlert.eta_seconds || 0;
+        const compass = activeAmbulanceAlert.heading_direction || 'North';
+
+        const ambIcon = L.divIcon({
+          className: 'custom-ambulance-live-pin',
+          html: `
+            <div style="position: relative; width: 46px; height: 46px; display: flex; align-items: center; justify-content: center;">
+              <!-- Pulsing Siren Strobe Halo -->
+              <div style="position: absolute; inset: -5px; border-radius: 9999px; background: rgba(239, 68, 68, 0.45); animation: ping 1.5s cubic-bezier(0, 0, 0.2, 1) infinite;"></div>
+              <div style="position: absolute; inset: -2px; border-radius: 9999px; background: rgba(220, 38, 38, 0.6); animation: pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;"></div>
+
+              <!-- Direction Arrow Pointer rotated by heading_degrees -->
+              <div style="position: absolute; width: 46px; height: 46px; transform: rotate(${heading}deg); pointer-events: none; display: flex; justify-content: center;">
+                <div style="width: 0; height: 0; border-left: 8px solid transparent; border-right: 8px solid transparent; border-bottom: 15px solid #fbbf24; position: absolute; top: -9px; filter: drop-shadow(0 2px 4px rgba(0,0,0,0.85));"></div>
+              </div>
+
+              <!-- Central Ambulance Vehicle Bubble -->
+              <div style="position: relative; z-index: 10; width: 36px; height: 36px; border-radius: 9999px; background: linear-gradient(135deg, #ef4444, #b91c1c); border: 2.5px solid #ffffff; box-shadow: 0 4px 14px rgba(220,38,38,0.65); display: flex; align-items: center; justify-content: center; font-size: 18px; cursor: pointer;">
+                🚑
+              </div>
+
+              <!-- Floating Real-Time Distance & ETA Tag -->
+              <div style="position: absolute; bottom: -20px; left: 50%; transform: translateX(-50%); white-space: nowrap; background: rgba(15, 23, 42, 0.95); color: #ffffff; font-size: 9px; font-weight: 800; padding: 2px 7px; border-radius: 9999px; border: 1px solid rgba(239, 68, 68, 0.8); box-shadow: 0 2px 6px rgba(0,0,0,0.45); display: flex; align-items: center; gap: 3px;">
+                <span style="color: #ef4444;">🚨</span>
+                <span>${code}</span>
+                <span style="color: #4ade80;">• ${dist}m (${eta}s)</span>
+              </div>
+            </div>
+          `,
+          iconSize: [46, 46],
+          iconAnchor: [23, 23]
+        });
+
+        const ambMarker = L.marker([ambLoc.lat, ambLoc.lng], { icon: ambIcon })
+          .bindPopup(`
+            <div style="font-family: inherit; font-size: 12px; padding: 4px; min-width: 190px;">
+              <div style="display: flex; align-items: center; gap: 6px; font-weight: 900; color: #dc2626; font-size: 13px;">
+                <span>🚑 ${code} (Active Mission)</span>
+              </div>
+              <div style="margin-top: 6px; font-size: 11px; color: #334155; line-height: 1.55;">
+                <div><b>Speed:</b> ${speed} km/h</div>
+                <div><b>Heading:</b> ${heading}° (${compass})</div>
+                <div><b>Distance to user:</b> ${dist} m</div>
+                <div><b>ETA to user:</b> ${eta} seconds</div>
+                <div style="margin-top: 5px; color: #b91c1c; font-weight: 800; background: #fee2e2; padding: 3px 6px; border-radius: 4px;">
+                  ⚠️ Emergency Give Way Alert in Effect
+                </div>
+              </div>
+            </div>
+          `);
+        layers.addLayer(ambMarker);
+        boundsPoints.push([ambLoc.lat, ambLoc.lng]);
+
+        // Emergency Proximity Circle around ambulance
+        if (activeAmbulanceAlert.is_relevant_to_user) {
+          const ambRadiusCircle = L.circle([ambLoc.lat, ambLoc.lng], {
+            radius: 400,
+            color: '#ef4444',
+            fillColor: '#f87171',
+            fillOpacity: 0.12,
+            weight: 1.5,
+            dashArray: '4, 4'
+          });
+          layers.addLayer(ambRadiusCircle);
+        }
+      }
+    }
+
     // Force size recalculation and auto fit bounds if route/points exist
     map.invalidateSize();
 
@@ -326,11 +444,13 @@ export default function LeafletMap({
     alternativeRoutes,
     vehicleLocation,
     vehicleType,
+    activeAmbulanceAlert,
     incidents,
     citizens,
     alertRadiusMeters,
     showEmergencyRadius
   ]);
+
 
   return (
     <div

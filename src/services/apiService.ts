@@ -12,10 +12,12 @@ import type {
   GeoPoint,
   OptimizationWeights,
   IncidentRecord,
-  CitizenGiveWayAlertItem
+  CitizenGiveWayAlertItem,
+  ActiveAmbulanceAlertData
 } from '@/types';
 
 const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000';
+
 
 export async function optimizeRouteWithQPSO(params: {
   origin: GeoPoint;
@@ -132,6 +134,112 @@ export async function checkCitizenGiveWayAlerts(vehicleId: string, radiusMeters:
     }
   ];
 }
+
+export async function fetchActiveAmbulanceAlert(
+  userLat: number = 20.2740,
+  userLng: number = 85.8300,
+  radiusMeters: number = 1200
+): Promise<ActiveAmbulanceAlertData> {
+  try {
+    const res = await fetch(
+      `${API_BASE_URL}/api/emergency/active-ambulance?user_lat=${userLat}&user_lng=${userLng}&alert_radius_meters=${radiusMeters}`
+    );
+    if (res.ok) {
+      const data = await res.json();
+      return data;
+    }
+  } catch (e) {
+    // fallback to simulated corridor if backend unreachable
+  }
+
+  // Client-side simulation fallback: location-aware corridor
+  // Detect if user is in Raipur (~21.25) or Bhubaneswar (~20.28)
+  const isRaipur = Math.abs(userLat - 21.25) < 1.0;
+
+  const corridorCoords: [number, number][] = isRaipur
+    ? [
+        [21.2420, 81.6320],
+        [21.2480, 81.6305],
+        [21.2530, 81.6298],
+        [21.2580, 81.6290],
+        [21.2640, 81.6280]
+      ]
+    : [
+        [20.2720, 85.8280],
+        [20.2810, 85.8250],
+        [20.2950, 85.8210],
+        [20.3050, 85.8190],
+        [20.3120, 85.8180]
+      ];
+
+  // Smoothly move ambulance step based on time
+  const stepCount = corridorCoords.length;
+  const cycleIndex = Math.floor((Date.now() / 4000) % stepCount);
+  const nextIndex = Math.min(stepCount - 1, cycleIndex + 1);
+
+  const ambPos = corridorCoords[cycleIndex];
+  const nextPos = corridorCoords[nextIndex];
+
+  // Calculate bearing in degrees
+  const dLng = (nextPos[1] - ambPos[1]) * (Math.PI / 180);
+  const lat1 = ambPos[0] * (Math.PI / 180);
+  const lat2 = nextPos[0] * (Math.PI / 180);
+  const y = Math.sin(dLng) * Math.cos(lat2);
+  const x = Math.cos(lat1) * Math.sin(lat2) - Math.sin(lat1) * Math.cos(lat2) * Math.cos(dLng);
+  let bearing = (Math.atan2(y, x) * 180) / Math.PI;
+  bearing = (bearing + 360) % 360;
+
+  const compassDirections = ['North', 'North-East', 'East', 'South-East', 'South', 'South-West', 'West', 'North-West'];
+  const compassIdx = Math.floor(((bearing + 22.5) % 360) / 45);
+  const headingDirection = compassDirections[compassIdx];
+
+  // Distance from ambulance to user
+  const distKm = calculateHaversine(ambPos[0], ambPos[1], userLat, userLng);
+  const distMeters = Math.round(distKm * 1000);
+  const speedKmh = 72;
+  const etaSec = Math.max(5, Math.round((distKm / speedKmh) * 3600));
+
+  const isRelevant = distMeters <= radiusMeters;
+
+  return {
+    has_active_ambulance: true,
+    is_relevant_to_user: isRelevant,
+    vehicle_id: 'ev-1',
+    vehicle_code: 'AMB-108',
+    vehicle_type: 'ambulance',
+    ambulance_location: {
+      lat: ambPos[0],
+      lng: ambPos[1],
+      name: `Ambulance AMB-108 (Corridor Waypoint #${cycleIndex + 1})`
+    },
+    heading_degrees: Math.round(bearing),
+    heading_direction: headingDirection,
+    speed_kmh: speedKmh,
+    distance_meters: distMeters,
+    eta_seconds: etaSec,
+    active_route_geometry: corridorCoords,
+    message: isRelevant
+      ? `🚨 AMB-108 approaching in ${etaSec}s (${distMeters}m away, heading ${headingDirection}). Give way immediately!`
+      : `Ambulance AMB-108 active on corridor (${distMeters}m away).`,
+    give_way_action: 'Move to the left shoulder and clear the emergency corridor immediately.',
+    is_approaching: true
+  };
+}
+
+export async function stepEmergencyVehicle(vehicleId: string = 'ev-1'): Promise<any> {
+  try {
+    const res = await fetch(`${API_BASE_URL}/api/emergency/step`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ vehicle_id: vehicleId })
+    });
+    if (res.ok) {
+      return await res.json();
+    }
+  } catch (e) {}
+  return { status: 'success', vehicle_id: vehicleId };
+}
+
 
 // -------------------------------------------------------------
 // Real Road Geometry Client Fetcher & QPSO Evaluator

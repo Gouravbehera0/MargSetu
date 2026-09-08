@@ -191,8 +191,11 @@ class EmergencyVehicle(BaseModel):
     destination: GeoPoint
     eta_minutes: float
     speed_kmh: float = 65.0
+    heading_degrees: float = 0.0
+    heading_direction: str = "North"
+    current_step_index: int = 0
     active_route_geometry: List[List[float]] = []
-    alert_radius_meters: float = 500.0
+    alert_radius_meters: float = 600.0
 
 
 class CitizenGiveWayAlert(BaseModel):
@@ -204,3 +207,29 @@ class CitizenGiveWayAlert(BaseModel):
     message: str
     severity: str = "critical"
     timestamp: datetime = Field(default_factory=datetime.utcnow)
+    ambulance_location: Optional[GeoPoint] = None
+    heading_degrees: Optional[float] = None
+    heading_direction: Optional[str] = None
+    speed_kmh: Optional[float] = None
+    active_route_geometry: Optional[List[List[float]]] = None
+    eta_seconds: Optional[int] = None
+    is_approaching: bool = True
+
+
+class ActiveAmbulanceAlertResponse(BaseModel):
+    has_active_ambulance: bool
+    is_relevant_to_user: bool = False
+    vehicle_id: Optional[str] = None
+    vehicle_code: Optional[str] = None
+    vehicle_type: Optional[VehicleType] = None
+    ambulance_location: Optional[GeoPoint] = None
+    heading_degrees: float = 0.0
+    heading_direction: str = "North"
+    speed_kmh: float = 70.0
+    distance_meters: float = 0.0
+    eta_seconds: int = 0
+    active_route_geometry: List[List[float]] = []
+    message: str = ""
+    give_way_action: str = ""
+    is_approaching: bool = True
+
