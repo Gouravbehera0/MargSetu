@@ -232,7 +232,7 @@ export default function MapPlannerPage() {
   }, [handleDragMove, handleDragEnd]);
 
   const [origin, setOrigin] = useState<GeoPoint>(INITIAL_CITY.center);
-  const [destination, setDestination] = useState<GeoPoint>(INITIAL_CITY.defaultDestination);
+  const [destination, setDestination] = useState<GeoPoint | null>(null);
   const [presets, setPresets] = useState<PresetDestination[]>(INITIAL_CITY.presets);
   const [selectedCityId, setSelectedCityId] = useState<string>(INITIAL_CITY.id);
   const [activeRegionNotice, setActiveRegionNotice] = useState<string>('Raipur, Chhattisgarh');
@@ -259,7 +259,7 @@ export default function MapPlannerPage() {
   const [showOriginDropdown, setShowOriginDropdown] = useState(false);
 
   // Search autocomplete state for Destination
-  const [destQuery, setDestQuery] = useState(INITIAL_CITY.defaultDestination.name || 'Raipur Junction Railway Station');
+  const [destQuery, setDestQuery] = useState('');
   const [destSuggestions, setDestSuggestions] = useState<LocationSearchResult[]>([]);
   const [isSearchingDest, setIsSearchingDest] = useState(false);
   const [showDestDropdown, setShowDestDropdown] = useState(false);
@@ -282,8 +282,9 @@ export default function MapPlannerPage() {
   }, [origin.name]);
 
   useEffect(() => {
-    if (destination.name) setDestQuery(destination.name);
-  }, [destination.name]);
+    if (destination?.name) setDestQuery(destination.name);
+    else if (!destination) setDestQuery('');
+  }, [destination?.name]);
 
   // Real-Time Radar Polling: Listen for active emergency vehicles approaching citizen/origin location
   useEffect(() => {
@@ -378,13 +379,19 @@ export default function MapPlannerPage() {
 
   // Recalculate route whenever origin, destination, vehicleType, or preference changes
   useEffect(() => {
+    if (!destination) {
+      setOptimizationResult(null);
+      setSelectedCandidate(null);
+      return;
+    }
     const timer = setTimeout(() => {
       handleRunOptimization();
     }, 150);
     return () => clearTimeout(timer);
-  }, [origin.lat, origin.lng, destination.lat, destination.lng, vehicleType, preference]);
+  }, [origin.lat, origin.lng, destination?.lat, destination?.lng, vehicleType, preference]);
 
   async function handleRunOptimization() {
+    if (!destination) return;
     setLoading(true);
     try {
       const res = await optimizeRouteWithQPSO({
@@ -410,7 +417,7 @@ export default function MapPlannerPage() {
   }
 
   /**
-   * Applies user coordinates, reverse-geocodes origin, and sets destination & presets according to it!
+   * Applies user coordinates and reverse-geocodes origin (does NOT randomly assign a destination)
    */
   async function applyUserCoordinates(lat: number, lng: number) {
     setIsDetectingLocation(true);
@@ -424,10 +431,8 @@ export default function MapPlannerPage() {
       setOrigin(newOrigin);
       setOriginQuery(resolvedPlaceName);
 
-      // Dynamically configure ending point and presets according to this starting point
+      // Dynamically configure local destination presets for the user's detected region
       const intelligentSetup = getIntelligentDestinationSetup(lat, lng, resolvedPlaceName);
-      setDestination(intelligentSetup.defaultDestination);
-      setDestQuery(intelligentSetup.defaultDestination.name || '');
       setPresets(intelligentSetup.presets);
       setActiveRegionNotice(intelligentSetup.detectedCityName);
 
@@ -482,8 +487,10 @@ export default function MapPlannerPage() {
     setActiveRegionNotice(`${city.cityName}, ${city.stateName}`);
     setOrigin(city.center);
     setOriginQuery(city.center.name || city.cityName);
-    setDestination(city.defaultDestination);
-    setDestQuery(city.defaultDestination.name || '');
+    setDestination(null);
+    setDestQuery('');
+    setOptimizationResult(null);
+    setSelectedCandidate(null);
     setPresets(city.presets);
     setShowOriginDropdown(false);
     setShowDestDropdown(false);
@@ -496,6 +503,7 @@ export default function MapPlannerPage() {
    * Swaps Origin and Destination
    */
   function handleSwapPoints() {
+    if (!destination) return;
     const prevOrigin = { ...origin };
     const prevDest = { ...destination };
     setOrigin(prevDest);
@@ -544,12 +552,14 @@ export default function MapPlannerPage() {
     }
     const timer = setTimeout(async () => {
       setIsSearchingDest(true);
-      const results = await searchPlacesAutocomplete(destQuery, destination.lat, destination.lng);
+      const refLat = destination?.lat || origin.lat;
+      const refLng = destination?.lng || origin.lng;
+      const results = await searchPlacesAutocomplete(destQuery, refLat, refLng);
       setDestSuggestions(results);
       setIsSearchingDest(false);
     }, 350);
     return () => clearTimeout(timer);
-  }, [destQuery]);
+  }, [destQuery, destination, origin.lat, origin.lng]);
 
   function handleSelectOriginSuggestion(item: LocationSearchResult) {
     const newOrigin: GeoPoint = {
@@ -561,10 +571,8 @@ export default function MapPlannerPage() {
     setOriginQuery(item.name);
     setShowOriginDropdown(false);
 
-    // If selected origin is far from current destination, align destination according to it
+    // Update nearby destination presets based on new origin, without forcing a destination
     const intelligentSetup = getIntelligentDestinationSetup(item.lat, item.lng, item.name);
-    setDestination(intelligentSetup.defaultDestination);
-    setDestQuery(intelligentSetup.defaultDestination.name || '');
     setPresets(intelligentSetup.presets);
     setActiveRegionNotice(intelligentSetup.detectedCityName);
   }
@@ -595,11 +603,34 @@ export default function MapPlannerPage() {
     }
   }
 
-  // Active polylines to render on both Mobile and Desktop maps
-  const activeRoutePolyline = selectedCandidate?.coordinates || optimizationResult?.route_geometry;
-  const alternativePolylines = optimizationResult?.candidate_alternatives
+  // Active polylines to render on both Mobile and Desktop maps (only when destination is chosen)
+  const activeRoutePolyline = destination ? (selectedCandidate?.coordinates || optimizationResult?.route_geometry) : undefined;
+  const alternativePolylines = destination ? (optimizationResult?.candidate_alternatives
     ?.filter((c) => c.id !== selectedCandidate?.id)
-    .map((c) => c.coordinates) || [];
+    .map((c) => c.coordinates) || []) : [];
+
+  const handleStartNavigation = () => {
+    if (!destination) return;
+    const activeEta = selectedCandidate?.travel_time_min || optimizationResult?.eta_minutes || 11;
+    const activeDist = selectedCandidate?.distance_km || optimizationResult?.distance_km || 8.8;
+    const candidateName = selectedCandidate?.name || optimizationResult?.primary_route?.name || 'QPSO Optimized Corridor';
+
+    navigate('/navigate', {
+      state: {
+        origin,
+        destination,
+        vehicleType,
+        polyline: activeRoutePolyline,
+        alternatives: alternativePolylines,
+        etaMinutes: activeEta,
+        distanceKm: activeDist,
+        corridorName: candidateName,
+        optimizationResult,
+        selectedCandidate,
+        activeAmbulance
+      }
+    });
+  };
 
   // =========================================================================
   // MOBILE VIEW: Lyft iOS Transit Route Map Experience for Android & iOS Users
@@ -665,9 +696,9 @@ export default function MapPlannerPage() {
               </div>
               <ArrowRight className="w-3.5 h-3.5 text-slate-400 shrink-0" />
               <div className="flex items-center space-x-1.5 truncate text-xs font-bold text-slate-800">
-                <span className="w-2 h-2 rounded-full bg-rose-500 shrink-0" />
-                <span className="truncate max-w-[100px] sm:max-w-[140px]">
-                  {destination.name ? destination.name.split(',')[0] : 'Destination'}
+                <span className={`w-2 h-2 rounded-full shrink-0 ${destination ? 'bg-rose-500' : 'bg-slate-400'}`} />
+                <span className={`truncate max-w-[100px] sm:max-w-[140px] ${destination ? 'text-slate-800 font-bold' : 'text-slate-500 font-medium'}`}>
+                  {destination ? (destination.name ? destination.name.split(',')[0] : 'Destination') : 'Where to?'}
                 </span>
               </div>
             </div>
@@ -785,38 +816,52 @@ export default function MapPlannerPage() {
             onClick={toggleSheet}
           >
             <div className="flex items-center justify-between p-2.5 rounded-2xl bg-slate-50 border border-slate-200/80 shadow-2xs">
-              <div className="flex items-center space-x-1.5 text-xs overflow-x-auto scrollbar-none py-0.5">
-                {/* Vehicle Pill */}
-                <span className="inline-flex items-center space-x-1 px-2.5 py-1 rounded-xl bg-white border border-slate-200 shadow-2xs font-bold text-slate-800 shrink-0">
-                  {(() => {
-                    const veh = VEHICLES.find((v) => v.type === vehicleType);
-                    const Icon = veh ? veh.icon : Car;
-                    return <Icon className="w-3.5 h-3.5 text-blue-600" />;
-                  })()}
-                  <span className="capitalize">{vehicleType}</span>
-                </span>
-
-                <span className="text-slate-400 font-bold text-xs shrink-0">›</span>
-
-                {/* Corridor Badge */}
-                <span className="inline-flex items-center space-x-1 px-2.5 py-1 rounded-xl bg-blue-100/90 border border-blue-200 font-bold text-blue-900 shrink-0">
-                  <RouteIcon className="w-3 h-3 text-blue-600" />
-                  <span className="truncate max-w-[120px]">
-                    {selectedCandidate?.name?.split('(')[0] || 'Corridor A'}
+              {destination ? (
+                <div className="flex items-center space-x-1.5 text-xs overflow-x-auto scrollbar-none py-0.5">
+                  {/* Vehicle Pill */}
+                  <span className="inline-flex items-center space-x-1 px-2.5 py-1 rounded-xl bg-white border border-slate-200 shadow-2xs font-bold text-slate-800 shrink-0">
+                    {(() => {
+                      const veh = VEHICLES.find((v) => v.type === vehicleType);
+                      const Icon = veh ? veh.icon : Car;
+                      return <Icon className="w-3.5 h-3.5 text-blue-600" />;
+                    })()}
+                    <span className="capitalize">{vehicleType}</span>
                   </span>
-                </span>
 
-                <span className="text-slate-400 font-bold text-xs shrink-0">›</span>
+                  <span className="text-slate-400 font-bold text-xs shrink-0">›</span>
 
-                {/* ETA & Distance */}
-                <span className="inline-flex items-center space-x-1 px-2.5 py-1 rounded-xl bg-emerald-100/90 border border-emerald-200 font-black text-emerald-900 shrink-0">
-                  <span>⏱️ {selectedCandidate?.travel_time_min || optimizationResult?.eta_minutes || 11}m</span>
-                  <span className="text-emerald-700 font-semibold">• {selectedCandidate?.distance_km || optimizationResult?.distance_km || 8.8}km</span>
-                </span>
-              </div>
+                  {/* Corridor Badge */}
+                  <span className="inline-flex items-center space-x-1 px-2.5 py-1 rounded-xl bg-blue-100/90 border border-blue-200 font-bold text-blue-900 shrink-0">
+                    <RouteIcon className="w-3 h-3 text-blue-600" />
+                    <span className="truncate max-w-[120px]">
+                      {selectedCandidate?.name?.split('(')[0] || 'Corridor A'}
+                    </span>
+                  </span>
+
+                  <span className="text-slate-400 font-bold text-xs shrink-0">›</span>
+
+                  {/* ETA & Distance */}
+                  <span className="inline-flex items-center space-x-1 px-2.5 py-1 rounded-xl bg-emerald-100/90 border border-emerald-200 font-black text-emerald-900 shrink-0">
+                    <span>⏱️ {selectedCandidate?.travel_time_min || optimizationResult?.eta_minutes || 11}m</span>
+                    <span className="text-emerald-700 font-semibold">• {selectedCandidate?.distance_km || optimizationResult?.distance_km || 8.8}km</span>
+                  </span>
+                </div>
+              ) : (
+                <div className="flex items-center space-x-2 text-xs py-0.5" onClick={(e) => { e.stopPropagation(); setIsMobileSearchOpen(true); }}>
+                  <div className="w-7 h-7 rounded-xl bg-blue-600 text-white flex items-center justify-center shrink-0 shadow-xs">
+                    <Search className="w-3.5 h-3.5" />
+                  </div>
+                  <div>
+                    <span className="font-bold text-slate-800 block text-xs">Where are you going?</span>
+                    <span className="text-slate-400 block text-[11px]">Tap to search destination or pick preset</span>
+                  </div>
+                </div>
+              )}
 
               <div className="flex items-center space-x-1 ml-2 text-slate-500 shrink-0">
-                <span className="text-[11px] font-bold text-blue-600 hidden sm:inline">Details</span>
+                <span className="text-[11px] font-bold text-blue-600 hidden sm:inline">
+                  {destination ? 'Details' : 'Explore'}
+                </span>
                 <ChevronUp
                   className={`w-4 h-4 text-slate-600 transition-transform duration-300 ${
                     sheetHeight > PEEK_HEIGHT + 20 ? 'rotate-180' : ''
@@ -832,154 +877,243 @@ export default function MapPlannerPage() {
               sheetHeight > PEEK_HEIGHT + 15 ? 'opacity-100' : 'opacity-0 pointer-events-none'
             }`}
           >
-            {/* Route Summary Metrics */}
-            <div
-              className="flex items-center justify-between pt-1 cursor-grab active:cursor-grabbing select-none"
-              onTouchStart={(e) => {
-                if (e.touches[0]) handleDragStart(e.touches[0].clientY);
-              }}
-              onTouchMove={(e) => {
-                if (e.touches[0]) handleDragMove(e.touches[0].clientY);
-              }}
-              onTouchEnd={(e) => {
-                if (e.changedTouches[0]) handleDragEnd(e.changedTouches[0].clientY);
-              }}
-              onMouseDown={(e) => handleDragStart(e.clientY)}
-            >
-              <div>
-                <div className="text-2xl font-black text-slate-900">
-                  {selectedCandidate?.travel_time_min || optimizationResult?.eta_minutes || 11} min
-                </div>
-                <div className="text-xs text-slate-500 font-medium">
-                  {selectedCandidate?.distance_km || optimizationResult?.distance_km || 8.8} km • QPSO Optimized
-                </div>
-              </div>
-              <div className="text-right">
-                <span className="inline-flex items-center px-2.5 py-1 rounded-full text-xs font-bold bg-emerald-100 text-emerald-800">
-                  🟢 Free Flow
-                </span>
-              </div>
-            </div>
+            {!destination ? (
+              <div className="space-y-4 pt-1">
+                {/* Search Bar CTA */}
+                <button
+                  type="button"
+                  onClick={() => setIsMobileSearchOpen(true)}
+                  className="w-full bg-blue-600 hover:bg-blue-700 text-white font-extrabold py-3 px-4 rounded-2xl shadow-lg shadow-blue-500/25 flex items-center justify-center space-x-2 text-sm transition-all"
+                >
+                  <Search className="w-4 h-4" />
+                  <span>Choose Destination to Calculate Route</span>
+                </button>
 
-              {/* Start Live Navigation Primary Action Button */}
-              <button
-                type="button"
-                onClick={() => navigate('/navigate')}
-                className="w-full bg-blue-600 hover:bg-blue-700 active:scale-[0.98] text-white font-extrabold py-3.5 px-4 rounded-2xl shadow-lg shadow-blue-500/25 flex items-center justify-center space-x-2 transition-all text-sm"
-              >
-                <Navigation className="w-4 h-4 text-white" />
-                <span>Start Navigation ({selectedCandidate?.travel_time_min || optimizationResult?.eta_minutes || 11} min)</span>
-                <ArrowRight className="w-4 h-4 text-blue-200" />
-              </button>
-
-              {/* Candidate Corridors Horizontal Carousel */}
-              <div>
-                <div className="text-xs font-bold text-slate-600 uppercase tracking-wide mb-2 flex items-center justify-between">
-                  <span>Corridor Options ({optimizationResult?.candidate_alternatives?.length || 1})</span>
-                  <span className="text-[10px] text-blue-600 font-semibold">QPSO Quantum Ranked</span>
-                </div>
-                <div className="flex space-x-2.5 overflow-x-auto pb-1 scrollbar-none">
-                  {optimizationResult?.candidate_alternatives?.map((cand) => {
-                    const isCandSelected = selectedCandidate?.id === cand.id;
-                    return (
-                      <div
-                        key={cand.id}
-                        onClick={() => setSelectedCandidate(cand)}
-                        className={`min-w-[170px] p-3 rounded-2xl border text-left cursor-pointer transition-all active:scale-95 ${
-                          isCandSelected
-                            ? 'bg-blue-50/90 border-blue-500 ring-2 ring-blue-400/40 shadow-xs'
-                            : 'bg-white border-slate-200 hover:border-slate-300'
-                        }`}
-                      >
-                        <div className="text-xs font-bold text-slate-800 truncate">{cand.name}</div>
-                        <div className="flex items-center justify-between mt-1 text-xs">
-                          <span className="font-extrabold text-blue-600">{cand.travel_time_min} min</span>
-                          <span className="text-slate-500 text-[11px]">{cand.distance_km} km</span>
-                        </div>
-                        <div className="mt-1 text-[10px] font-semibold text-slate-400">
-                          Fitness: {cand.composite_fitness}
-                        </div>
-                      </div>
-                    );
-                  })}
-                </div>
-              </div>
-
-              {/* Vehicle Type Horizontal Selector */}
-              <div>
-                <div className="text-xs font-bold text-slate-600 uppercase tracking-wide mb-2">
-                  Vehicle Mode
-                </div>
-                <div className="flex space-x-2 overflow-x-auto pb-1 scrollbar-none">
-                  {VEHICLES.map((v) => {
-                    const Icon = v.icon;
-                    const isSelected = vehicleType === v.type;
-                    return (
+                {/* Local Presets for 1-tap route selection */}
+                <div>
+                  <div className="text-xs font-bold text-slate-600 uppercase tracking-wide mb-2 flex items-center justify-between">
+                    <span>1-Tap Regional Destinations</span>
+                    <span className="text-[10px] text-blue-600 font-semibold">{activeRegionNotice}</span>
+                  </div>
+                  <div className="grid grid-cols-2 gap-2">
+                    {presets.slice(0, 4).map((p, idx) => (
                       <button
-                        key={v.type}
+                        key={idx}
                         type="button"
-                        onClick={() => setVehicleType(v.type)}
-                        className={`flex items-center space-x-1.5 px-3 py-2 rounded-xl text-xs font-bold whitespace-nowrap transition-all border ${
-                          isSelected
-                            ? v.isEmergency
-                              ? 'bg-red-600 text-white border-red-600 shadow-sm'
-                              : 'bg-blue-600 text-white border-blue-600 shadow-sm'
-                            : 'bg-white text-slate-700 border-slate-200 hover:bg-slate-50'
-                        }`}
+                        onClick={() => {
+                          setDestination(p.point);
+                          setDestQuery(p.point.name || p.label);
+                        }}
+                        className="flex items-center space-x-2.5 p-3 rounded-2xl border border-slate-200 bg-slate-50 hover:bg-blue-50 hover:border-blue-300 text-left text-xs transition-all active:scale-98"
                       >
-                        <Icon className="w-3.5 h-3.5" />
-                        <span>{v.label}</span>
+                        <span className="p-2 rounded-xl bg-white shadow-2xs">
+                          {getCategoryIcon(p.category)}
+                        </span>
+                        <div className="truncate">
+                          <div className="font-bold text-slate-800 truncate">{p.label}</div>
+                          <div className="text-[10px] text-slate-500 truncate capitalize">{p.category}</div>
+                        </div>
                       </button>
-                    );
-                  })}
+                    ))}
+                  </div>
                 </div>
-              </div>
 
-              {/* Route Preference Horizontal Selector */}
-              <div>
-                <div className="text-xs font-bold text-slate-600 uppercase tracking-wide mb-2">
-                  Routing Preference
-                </div>
-                <div className="flex space-x-2 overflow-x-auto pb-1 scrollbar-none">
-                  {PREFERENCES.map((p) => {
-                    const isSelected = preference === p.key;
-                    return (
-                      <button
-                        key={p.key}
-                        type="button"
-                        onClick={() => setPreference(p.key)}
-                        className={`px-3 py-1.5 rounded-xl text-xs font-semibold whitespace-nowrap transition-all border ${
-                          isSelected
-                            ? 'bg-slate-900 text-white border-slate-900 shadow-sm font-bold'
-                            : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-50'
-                        }`}
-                      >
-                        {p.label}
-                      </button>
-                    );
-                  })}
+                {/* Vehicle Mode Selector */}
+                <div>
+                  <div className="text-xs font-bold text-slate-600 uppercase tracking-wide mb-2">
+                    Vehicle Mode
+                  </div>
+                  <div className="flex space-x-2 overflow-x-auto pb-1 scrollbar-none">
+                    {VEHICLES.map((v) => {
+                      const Icon = v.icon;
+                      const isSelected = vehicleType === v.type;
+                      return (
+                        <button
+                          key={v.type}
+                          type="button"
+                          onClick={() => setVehicleType(v.type)}
+                          className={`flex items-center space-x-1.5 px-3 py-2 rounded-xl text-xs font-bold whitespace-nowrap transition-all border ${
+                            isSelected
+                              ? v.isEmergency
+                                ? 'bg-red-600 text-white border-red-600 shadow-sm'
+                                : 'bg-blue-600 text-white border-blue-600 shadow-sm'
+                              : 'bg-white text-slate-700 border-slate-200 hover:bg-slate-50'
+                          }`}
+                        >
+                          <Icon className="w-3.5 h-3.5" />
+                          <span>{v.label}</span>
+                        </button>
+                      );
+                    })}
+                  </div>
                 </div>
               </div>
+            ) : (
+              <>
+                {/* Route Summary Metrics */}
+                <div
+                  className="flex items-center justify-between pt-1 cursor-grab active:cursor-grabbing select-none"
+                  onTouchStart={(e) => {
+                    if (e.touches[0]) handleDragStart(e.touches[0].clientY);
+                  }}
+                  onTouchMove={(e) => {
+                    if (e.touches[0]) handleDragMove(e.touches[0].clientY);
+                  }}
+                  onTouchEnd={(e) => {
+                    if (e.changedTouches[0]) handleDragEnd(e.changedTouches[0].clientY);
+                  }}
+                  onMouseDown={(e) => handleDragStart(e.clientY)}
+                >
+                  <div>
+                    <div className="text-2xl font-black text-slate-900">
+                      {selectedCandidate?.travel_time_min || optimizationResult?.eta_minutes || 11} min
+                    </div>
+                    <div className="text-xs text-slate-500 font-medium">
+                      {selectedCandidate?.distance_km || optimizationResult?.distance_km || 8.8} km • QPSO Optimized
+                    </div>
+                  </div>
+                  <div className="text-right">
+                    <span className="inline-flex items-center px-2.5 py-1 rounded-full text-xs font-bold bg-emerald-100 text-emerald-800">
+                      🟢 Free Flow
+                    </span>
+                  </div>
+                </div>
 
-              {/* Turn Directions Summary */}
-              <div className="pt-2 border-t border-slate-100">
-                <div className="text-xs font-bold text-slate-700 mb-2">Key Waypoints</div>
-                <div className="space-y-2 text-xs text-slate-600">
-                  <div className="flex items-center space-x-2">
-                    <span className="w-2.5 h-2.5 rounded-full bg-emerald-500 shrink-0" />
-                    <span>Depart: <strong>{origin.name || 'Start Point'}</strong></span>
+                {/* Start Live Navigation Primary Action Button */}
+                <button
+                  type="button"
+                  onClick={handleStartNavigation}
+                  className="w-full bg-blue-600 hover:bg-blue-700 active:scale-[0.98] text-white font-extrabold py-3.5 px-4 rounded-2xl shadow-lg shadow-blue-500/25 flex items-center justify-center space-x-2 transition-all text-sm"
+                >
+                  <Navigation className="w-4 h-4 text-white" />
+                  <span>Start Navigation ({selectedCandidate?.travel_time_min || optimizationResult?.eta_minutes || 11} min)</span>
+                  <ArrowRight className="w-4 h-4 text-blue-200" />
+                </button>
+
+                {/* Candidate Corridors Horizontal Carousel */}
+                <div>
+                  <div className="text-xs font-bold text-slate-600 uppercase tracking-wide mb-2 flex items-center justify-between">
+                    <span>Corridor Options ({optimizationResult?.candidate_alternatives?.length || 1})</span>
+                    <span className="text-[10px] text-blue-600 font-semibold">QPSO Quantum Ranked</span>
                   </div>
-                  <div className="flex items-center space-x-2">
-                    <span className="w-2.5 h-2.5 rounded-full bg-blue-500 shrink-0" />
-                    <span>Via: <strong>{selectedCandidate?.name || 'Optimal Road Corridor'}</strong></span>
-                  </div>
-                  <div className="flex items-center space-x-2">
-                    <span className="w-2.5 h-2.5 rounded-full bg-rose-500 shrink-0" />
-                    <span>Arrive: <strong>{destination.name || 'Destination Point'}</strong></span>
+                  <div className="flex space-x-2.5 overflow-x-auto pb-1 scrollbar-none">
+                    {optimizationResult?.candidate_alternatives?.map((cand) => {
+                      const isCandSelected = selectedCandidate?.id === cand.id;
+                      return (
+                        <div
+                          key={cand.id}
+                          onClick={() => setSelectedCandidate(cand)}
+                          className={`min-w-[170px] p-3 rounded-2xl border text-left cursor-pointer transition-all active:scale-95 ${
+                            isCandSelected
+                              ? 'bg-blue-50/90 border-blue-500 ring-2 ring-blue-400/40 shadow-xs'
+                              : 'bg-white border-slate-200 hover:border-slate-300'
+                          }`}
+                        >
+                          <div className="text-xs font-bold text-slate-800 truncate">{cand.name}</div>
+                          <div className="flex items-center justify-between mt-1 text-xs">
+                            <span className="font-extrabold text-blue-600">{cand.travel_time_min} min</span>
+                            <span className="text-slate-500 text-[11px]">{cand.distance_km} km</span>
+                          </div>
+                          <div className="mt-1 text-[10px] font-semibold text-slate-400">
+                            Fitness: {cand.composite_fitness}
+                          </div>
+                        </div>
+                      );
+                    })}
                   </div>
                 </div>
-              </div>
-            </div>
+
+                {/* Vehicle Type Horizontal Selector */}
+                <div>
+                  <div className="text-xs font-bold text-slate-600 uppercase tracking-wide mb-2">
+                    Vehicle Mode
+                  </div>
+                  <div className="flex space-x-2 overflow-x-auto pb-1 scrollbar-none">
+                    {VEHICLES.map((v) => {
+                      const Icon = v.icon;
+                      const isSelected = vehicleType === v.type;
+                      return (
+                        <button
+                          key={v.type}
+                          type="button"
+                          onClick={() => setVehicleType(v.type)}
+                          className={`flex items-center space-x-1.5 px-3 py-2 rounded-xl text-xs font-bold whitespace-nowrap transition-all border ${
+                            isSelected
+                              ? v.isEmergency
+                                ? 'bg-red-600 text-white border-red-600 shadow-sm'
+                                : 'bg-blue-600 text-white border-blue-600 shadow-sm'
+                              : 'bg-white text-slate-700 border-slate-200 hover:bg-slate-50'
+                          }`}
+                        >
+                          <Icon className="w-3.5 h-3.5" />
+                          <span>{v.label}</span>
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+
+                {/* Route Preference Horizontal Selector */}
+                <div>
+                  <div className="text-xs font-bold text-slate-600 uppercase tracking-wide mb-2">
+                    Routing Preference
+                  </div>
+                  <div className="flex space-x-2 overflow-x-auto pb-1 scrollbar-none">
+                    {PREFERENCES.map((p) => {
+                      const isSelected = preference === p.key;
+                      return (
+                        <button
+                          key={p.key}
+                          type="button"
+                          onClick={() => setPreference(p.key)}
+                          className={`px-3 py-1.5 rounded-xl text-xs font-semibold whitespace-nowrap transition-all border ${
+                            isSelected
+                              ? 'bg-slate-900 text-white border-slate-900 shadow-sm font-bold'
+                              : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-50'
+                          }`}
+                        >
+                          {p.label}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+
+                {/* Turn Directions Summary */}
+                <div className="pt-2 border-t border-slate-100">
+                  <div className="flex items-center justify-between mb-2">
+                    <span className="text-xs font-bold text-slate-700">Key Waypoints</span>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setDestination(null);
+                        setDestQuery('');
+                        setOptimizationResult(null);
+                        setSelectedCandidate(null);
+                      }}
+                      className="text-[11px] font-bold text-red-600 hover:text-red-700"
+                    >
+                      Clear Destination
+                    </button>
+                  </div>
+                  <div className="space-y-2 text-xs text-slate-600">
+                    <div className="flex items-center space-x-2">
+                      <span className="w-2.5 h-2.5 rounded-full bg-emerald-500 shrink-0" />
+                      <span>Depart: <strong>{origin.name || 'Start Point'}</strong></span>
+                    </div>
+                    <div className="flex items-center space-x-2">
+                      <span className="w-2.5 h-2.5 rounded-full bg-blue-500 shrink-0" />
+                      <span>Via: <strong>{selectedCandidate?.name || 'Optimal Road Corridor'}</strong></span>
+                    </div>
+                    <div className="flex items-center space-x-2">
+                      <span className="w-2.5 h-2.5 rounded-full bg-rose-500 shrink-0" />
+                      <span>Arrive: <strong>{destination?.name || 'Destination Point'}</strong></span>
+                    </div>
+                  </div>
+                </div>
+              </>
+            )}
+          </div>
         </div>
 
         {/* 6. Mobile Route Search Modal / Sheet */}
@@ -1410,9 +1544,15 @@ export default function MapPlannerPage() {
                     <span className="w-2.5 h-2.5 rounded-full bg-rose-500 inline-block ring-2 ring-rose-200" />
                     <span>Destination (Ending Point)</span>
                   </div>
-                  <span className="text-[10px] text-rose-600 font-mono">
-                    {destination.lat.toFixed(4)}°, {destination.lng.toFixed(4)}°
-                  </span>
+                  {destination ? (
+                    <span className="text-[10px] text-rose-600 font-mono">
+                      {destination.lat.toFixed(4)}°, {destination.lng.toFixed(4)}°
+                    </span>
+                  ) : (
+                    <span className="text-[10px] text-slate-400 font-medium">
+                      Not set
+                    </span>
+                  )}
                 </label>
                 <div className="relative">
                   <input
@@ -1479,7 +1619,7 @@ export default function MapPlannerPage() {
                         setShowDestDropdown(false);
                       }}
                       className={`text-xs px-2.5 py-1.5 rounded-lg border transition-all flex items-center space-x-1.5 ${
-                        destination.name === preset.name
+                        destination?.name === preset.name
                           ? 'bg-blue-600 text-white border-blue-600 font-bold shadow-sm scale-[1.02]'
                           : 'bg-slate-100 text-slate-700 border-slate-200 hover:bg-slate-200'
                       }`}
@@ -1881,18 +2021,7 @@ export default function MapPlannerPage() {
 
                     {/* Start Navigation Action */}
                     <button
-                      onClick={() =>
-                        navigate('/navigate', {
-                          state: {
-                            origin,
-                            destination,
-                            vehicleType,
-                            polyline: activeRoutePolyline,
-                            etaMinutes: activeEta,
-                            distanceKm: activeDist
-                          }
-                        })
-                      }
+                      onClick={handleStartNavigation}
                       className="mt-3.5 w-full flex items-center justify-center space-x-2 bg-blue-600 hover:bg-blue-700 text-white font-bold py-2.5 rounded-xl text-xs shadow transition-all"
                     >
                       <Navigation className="w-4 h-4" />
@@ -2096,7 +2225,7 @@ export default function MapPlannerPage() {
               </div>
               <div className="flex items-center space-x-1.5">
                 <span className="w-2.5 h-2.5 rounded-full bg-rose-500 ring-2 ring-rose-200" />
-                <span>Destination: <strong className="text-slate-800">{destination.name ? destination.name.split(',')[0] : 'End'}</strong></span>
+                <span>Destination: <strong className="text-slate-800">{destination ? (destination.name ? destination.name.split(',')[0] : 'End') : 'Not Set'}</strong></span>
               </div>
               <div className="flex items-center space-x-1.5">
                 <span className={`w-3.5 h-1.5 rounded-full ${isEmergency ? 'bg-red-600' : 'bg-blue-600'}`} />

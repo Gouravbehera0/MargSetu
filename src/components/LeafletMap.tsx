@@ -535,11 +535,12 @@ export default function LeafletMap({
 
     // Crucial: Only auto-fit bounds when route key actually changes (new origin, destination, or new route computed)
     // NEVER re-fit bounds on polling ticks or ambulance steps so user zoom and pan remain completely smooth and uninterrupted!
-    const routeKey = `${origin?.lat.toFixed(4)},${origin?.lng.toFixed(4)}_${destination?.lat.toFixed(4)},${destination?.lng.toFixed(4)}_${primaryRoute?.length || 0}_${alternativeRoutes.length}`;
+    const destStr = destination ? `${destination.lat.toFixed(4)},${destination.lng.toFixed(4)}` : 'none';
+    const routeKey = `${origin?.lat.toFixed(4)},${origin?.lng.toFixed(4)}_${destStr}_${primaryRoute?.length || 0}_${alternativeRoutes.length}`;
 
     if (routeKey !== lastRouteKeyRef.current) {
       lastRouteKeyRef.current = routeKey;
-      if (routeBoundsRef.current && routeBoundsRef.current.isValid()) {
+      if (routeBoundsRef.current && routeBoundsRef.current.isValid() && boundsPoints.length >= 2) {
         try {
           map.fitBounds(routeBoundsRef.current, {
             padding: [45, 45],
@@ -548,7 +549,7 @@ export default function LeafletMap({
           });
         } catch (e) {}
       } else if (origin) {
-        map.setView([origin.lat, origin.lng], 13);
+        map.setView([origin.lat, origin.lng], 14);
       }
     }
 
