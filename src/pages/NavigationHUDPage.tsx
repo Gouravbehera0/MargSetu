@@ -2,6 +2,7 @@ import { useState, useEffect, useRef, useCallback } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import NavigationNavbar from '@/components/NavigationNavbar';
 import LeafletMap from '@/components/LeafletMap';
+import { useApp } from '@/context/AppContext';
 import { fetchActiveAmbulanceAlert, submitSpeedObservation, optimizeRouteWithQPSO } from '@/services/apiService';
 import type { GeoPoint, GeneralVehicleType, ActiveAmbulanceAlertData } from '@/types';
 import {
@@ -68,22 +69,24 @@ export default function NavigationHUDPage() {
   const location = useLocation();
   const navState = (location.state as any) || {};
 
-  const origin: GeoPoint = navState.origin || {
+  const { mapState } = useApp();
+
+  const origin: GeoPoint = navState.origin || mapState.origin || {
     lat: 21.2514,
     lng: 81.6296,
     name: 'Jaistambh Chowk, Raipur'
   };
 
-  const destination: GeoPoint = navState.destination || {
+  const destination: GeoPoint = navState.destination || mapState.destination || {
     lat: 21.25586,
     lng: 81.62954,
     name: 'Raipur Junction Railway Station'
   };
 
-  const vehicleType: GeneralVehicleType = navState.vehicleType || 'car';
-  const initialEta = navState.etaMinutes || 14;
-  const initialDist = navState.distanceKm || 6.8;
-  const corridorName: string = navState.corridorName || 'QPSO Optimized Corridor';
+  const vehicleType: GeneralVehicleType = navState.vehicleType || mapState.vehicleType || 'car';
+  const initialEta = navState.etaMinutes || mapState.optimizationResult?.eta_minutes || mapState.selectedCandidate?.travel_time_min || 14;
+  const initialDist = navState.distanceKm || mapState.optimizationResult?.distance_km || mapState.selectedCandidate?.distance_km || 6.8;
+  const corridorName: string = navState.corridorName || mapState.selectedCandidate?.name || mapState.optimizationResult?.route_name || 'QPSO Optimized Corridor';
 
   const [speedKmh, setSpeedKmh] = useState(48);
   const [navProgress, setNavProgress] = useState(0);
@@ -222,23 +225,29 @@ export default function NavigationHUDPage() {
   const [giveWayAcknowledged, setGiveWayAcknowledged] = useState(false);
 
 
-  // Route coordinates: use passed polyline if available, or generate a realistic fallback
+  // Route coordinates: use passed polyline if available, or mapState.primaryRoute, or generate a realistic fallback
   const initialCoordinates: [number, number][] =
     navState.polyline && navState.polyline.length >= 2
       ? navState.polyline
-      : [
-          [origin.lat, origin.lng],
-          [origin.lat + (destination.lat - origin.lat) * 0.3, origin.lng + (destination.lng - origin.lng) * 0.25],
-          [origin.lat + (destination.lat - origin.lat) * 0.65, origin.lng + (destination.lng - origin.lng) * 0.7],
-          [destination.lat, destination.lng]
-        ];
+      : (mapState.primaryRoute && mapState.primaryRoute.length >= 2
+          ? mapState.primaryRoute
+          : [
+              [origin.lat, origin.lng],
+              [origin.lat + (destination.lat - origin.lat) * 0.3, origin.lng + (destination.lng - origin.lng) * 0.25],
+              [origin.lat + (destination.lat - origin.lat) * 0.65, origin.lng + (destination.lng - origin.lng) * 0.7],
+              [destination.lat, destination.lng]
+            ]);
 
   const [routeCoordinates, setRouteCoordinates] = useState<[number, number][]>(initialCoordinates);
-  const [alternativeRoutes, setAlternativeRoutes] = useState<[number, number][][]>(navState.alternatives || []);
+  const [alternativeRoutes, setAlternativeRoutes] = useState<[number, number][][]>(
+    navState.alternatives && navState.alternatives.length > 0
+      ? navState.alternatives
+      : (mapState.alternativeRoutes || [])
+  );
 
   // Fetch real QPSO route if navigated directly or polyline missing
   useEffect(() => {
-    if (!navState.polyline || navState.polyline.length < 2) {
+    if ((!navState.polyline || navState.polyline.length < 2) && (!mapState.primaryRoute || mapState.primaryRoute.length < 2)) {
       optimizeRouteWithQPSO({
         origin,
         destination,
@@ -253,7 +262,7 @@ export default function NavigationHUDPage() {
         }
       }).catch((e) => console.warn('Navigation HUD fallback route error:', e));
     }
-  }, [origin.lat, origin.lng, destination.lat, destination.lng, vehicleType]);
+  }, [origin.lat, origin.lng, destination.lat, destination.lng, vehicleType, mapState.primaryRoute, navState.polyline]);
 
   // Advance vehicle smoothly along polyline in real-time
   useEffect(() => {

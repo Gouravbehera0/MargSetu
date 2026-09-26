@@ -1,7 +1,73 @@
 import { createContext, useContext, useState, useEffect, useCallback, type ReactNode } from 'react';
-import type { Role, EmergencyServiceType, EmergencyRequest, AlertItem, NavigationRoute } from '@/types';
+import type {
+  Role,
+  EmergencyServiceType,
+  EmergencyRequest,
+  AlertItem,
+  NavigationRoute,
+  GeoPoint,
+  GeneralVehicleType,
+  ActiveAmbulanceAlertData,
+  QPSOOptimizationResult,
+  RouteCandidateAlternative
+} from '@/types';
 import supabase from '@/lib/supabase';
 import { fetchProfile, fetchAlerts, fetchActiveRequest, createAlert as dbCreateAlert, dismissAlert as dbDismissAlert } from '@/services/supabaseQueries';
+
+export interface MapSyncState {
+  origin: GeoPoint;
+  destination: GeoPoint | null;
+  primaryRoute?: [number, number][];
+  alternativeRoutes: [number, number][][];
+  vehicleType: GeneralVehicleType;
+  activeAmbulance: ActiveAmbulanceAlertData | null;
+  selectedCityId: string;
+  activeRegionNotice: string;
+  optimizationResult: QPSOOptimizationResult | null;
+  selectedCandidate: RouteCandidateAlternative | null;
+  trafficEnabled: boolean;
+}
+
+const defaultMapState: MapSyncState = {
+  origin: {
+    lat: 21.2514,
+    lng: 81.6296,
+    name: 'Raipur Urban Center (Jaistambh Chowk)'
+  },
+  destination: null,
+  primaryRoute: undefined,
+  alternativeRoutes: [],
+  vehicleType: 'car',
+  activeAmbulance: null,
+  selectedCityId: 'raipur',
+  activeRegionNotice: 'Raipur, Chhattisgarh',
+  optimizationResult: null,
+  selectedCandidate: null,
+  trafficEnabled: true
+};
+
+function getInitialMapState(): MapSyncState {
+  try {
+    const saved = localStorage.getItem('margsetu_map_sync');
+    if (saved) {
+      const parsed = JSON.parse(saved);
+      if (parsed && typeof parsed === 'object') {
+        const safeOrigin =
+          parsed.origin && typeof parsed.origin.lat === 'number' && typeof parsed.origin.lng === 'number'
+            ? parsed.origin
+            : defaultMapState.origin;
+        return {
+          ...defaultMapState,
+          ...parsed,
+          origin: safeOrigin
+        };
+      }
+    }
+  } catch (e) {
+    console.error('Failed to parse saved map state:', e);
+  }
+  return defaultMapState;
+}
 
 interface AuthUser {
   id: string;
@@ -32,6 +98,8 @@ interface AppState {
   toasts: ToastMessage[];
   isGlobalLoading: boolean;
   globalLoadingMessage?: string;
+  mapState: MapSyncState;
+  updateMapState: (partial: Partial<MapSyncState>) => void;
   showGlobalLoader: (message?: string, durationMs?: number) => void;
   hideGlobalLoader: () => void;
   setRole: (role: Role) => void;
@@ -86,6 +154,39 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const [toasts, setToasts] = useState<ToastMessage[]>([]);
   const [isGlobalLoading, setIsGlobalLoading] = useState(false);
   const [globalLoadingMessage, setGlobalLoadingMessage] = useState('MargSetu Swarm Engine Initializing...');
+
+  const [mapState, setMapStateInternal] = useState<MapSyncState>(getInitialMapState);
+
+  const updateMapState = useCallback((partial: Partial<MapSyncState>) => {
+    setMapStateInternal((prev) => {
+      // Prevent infinite render loops by returning prev if no real change
+      let hasChanges = false;
+      for (const k in partial) {
+        const key = k as keyof MapSyncState;
+        if (partial[key] !== prev[key]) {
+          if (
+            typeof partial[key] === 'object' &&
+            typeof prev[key] === 'object' &&
+            JSON.stringify(partial[key]) === JSON.stringify(prev[key])
+          ) {
+            continue;
+          }
+          hasChanges = true;
+          break;
+        }
+      }
+      if (!hasChanges) {
+        return prev;
+      }
+      const next = { ...prev, ...partial };
+      try {
+        localStorage.setItem('margsetu_map_sync', JSON.stringify(next));
+      } catch (e) {
+        console.error('Failed to persist map state:', e);
+      }
+      return next;
+    });
+  }, []);
 
   const showGlobalLoader = useCallback((message?: string, durationMs?: number) => {
     if (message) setGlobalLoadingMessage(message);
@@ -291,6 +392,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
         globalLoadingMessage,
         showGlobalLoader,
         hideGlobalLoader,
+        mapState,
+        updateMapState,
       }}
     >
       {children}

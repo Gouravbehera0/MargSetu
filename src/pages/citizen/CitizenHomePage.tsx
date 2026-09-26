@@ -4,7 +4,7 @@ import AppHeader from '@/components/AppHeader';
 import BottomNavigation from '@/components/BottomNavigation';
 import EmergencyButton from '@/components/EmergencyButton';
 import ServiceCard from '@/components/ServiceCard';
-import MapMock from '@/components/MapMock';
+import LeafletMap from '@/components/LeafletMap';
 import { citizenMapMarkers } from '@/data/mockData';
 import { useApp } from '@/context/AppContext';
 import { fetchHospitals, fetchFireStations, fetchAmbulanceStations } from '@/services/supabaseQueries';
@@ -12,7 +12,12 @@ import type { NearbyService } from '@/types';
 
 export default function CitizenHomePage() {
   const navigate = useNavigate();
-  const { user, setServiceType } = useApp();
+  const { user, setServiceType, mapState } = useApp();
+  const safeOrigin = mapState?.origin || {
+    lat: 21.2514,
+    lng: 81.6296,
+    name: 'Raipur Urban Center'
+  };
   const [nearbyServices, setNearbyServices] = useState<NearbyService[]>([]);
 
   useEffect(() => {
@@ -48,7 +53,20 @@ export default function CitizenHomePage() {
       <AppHeader greeting={`Hello, ${greetingName} 👋`} location={location} />
 
       <div className="px-5 -mt-3">
-        <MapMock markers={citizenMapMarkers} className="h-48 shadow-card" />
+        <div className="h-48 rounded-2xl overflow-hidden shadow-card border border-slate-200 relative">
+          <LeafletMap
+            origin={safeOrigin}
+            destination={mapState.destination}
+            primaryRoute={mapState.primaryRoute}
+            alternativeRoutes={mapState.alternativeRoutes}
+            vehicleLocation={safeOrigin}
+            vehicleType={mapState.vehicleType}
+            activeAmbulanceAlert={mapState.activeAmbulance}
+            center={[safeOrigin.lat, safeOrigin.lng]}
+            zoom={13}
+            className="w-full h-full"
+          />
+        </div>
       </div>
 
       {/* Emergency Section */}

@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import AppHeader from '@/components/AppHeader';
 import BottomNavigation from '@/components/BottomNavigation';
-import MapMock from '@/components/MapMock';
+import LeafletMap from '@/components/LeafletMap';
 import StatusBadge from '@/components/StatusBadge';
 import { useApp } from '@/context/AppContext';
 import { fetchVehicles } from '@/services/supabaseQueries';
@@ -10,7 +10,12 @@ import { Navigation, RefreshCw, Clock, MapPin, AlertTriangle, Gauge, Activity } 
 
 export default function VehicleDashboardPage() {
   const navigate = useNavigate();
-  const { user } = useApp();
+  const { user, mapState } = useApp();
+  const safeOrigin = mapState?.origin || {
+    lat: 21.2514,
+    lng: 81.6296,
+    name: 'Raipur Urban Center'
+  };
   const [vehicle, setVehicle] = useState<{ code: string; status: string; driver_name: string; eta: string | null; distance: string | null } | null>(null);
 
   useEffect(() => {
@@ -111,15 +116,20 @@ export default function VehicleDashboardPage() {
             View QPSO
           </button>
         </div>
-        <MapMock
-          markers={[
-            { id: 'amb', type: 'ambulance', label: vehicleCode, position: { x: 30, y: 35 } },
-            { id: 'hosp', type: 'hospital', label: 'City Hospital', position: { x: 60, y: 75 } },
-          ]}
-          showRoute
-          className="h-56 shadow-card"
-          animatedVehicle
-        />
+        <div className="h-56 rounded-2xl overflow-hidden shadow-card border border-slate-200 relative">
+          <LeafletMap
+            origin={safeOrigin}
+            destination={mapState.destination}
+            primaryRoute={mapState.primaryRoute}
+            alternativeRoutes={mapState.alternativeRoutes}
+            vehicleLocation={mapState.activeAmbulance?.ambulance_location || safeOrigin}
+            vehicleType="ambulance"
+            activeAmbulanceAlert={mapState.activeAmbulance}
+            center={[safeOrigin.lat, safeOrigin.lng]}
+            zoom={14}
+            className="w-full h-full"
+          />
+        </div>
       </div>
 
       {/* Action buttons */}

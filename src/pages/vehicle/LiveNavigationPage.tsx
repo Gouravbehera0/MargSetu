@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { ChevronLeft, Ambulance, Navigation, RefreshCw, ChevronDown, ChevronUp, Hospital, Clock, MapPin, Gauge } from 'lucide-react';
-import EmergencyNavigationMap from '@/components/EmergencyNavigationMap';
+import LeafletMap from '@/components/LeafletMap';
 import TurnInstruction from '@/components/TurnInstruction';
 import StatusBadge from '@/components/StatusBadge';
 import { useApp } from '@/context/AppContext';
@@ -17,7 +17,12 @@ const trafficLabel: Record<string, { text: string; color: string; dot: string }>
 
 export default function LiveNavigationPage() {
   const navigate = useNavigate();
-  const { activeRoute, setActiveRoute, showToast } = useApp();
+  const { activeRoute, setActiveRoute, showToast, mapState } = useApp();
+  const safeOrigin = mapState?.origin || {
+    lat: 21.2514,
+    lng: 81.6296,
+    name: 'Raipur Urban Center'
+  };
   const [progress, setProgress] = useState(0);
   const [cardExpanded, setCardExpanded] = useState(true);
   const [routeKey, setRouteKey] = useState(0);
@@ -84,14 +89,16 @@ export default function LiveNavigationPage() {
 
       {/* Map area */}
       <div className="absolute inset-0">
-        <EmergencyNavigationMap
-          key={routeKey}
-          route={route}
-          vehiclePosition={simState.position}
-          destination={destinationPosition}
-          trafficData={navigationTrafficSegments}
-          incidents={navigationIncidents}
-          progress={progress}
+        <LeafletMap
+          origin={safeOrigin}
+          destination={mapState.destination}
+          primaryRoute={mapState.primaryRoute}
+          alternativeRoutes={mapState.alternativeRoutes}
+          vehicleLocation={mapState.activeAmbulance?.ambulance_location || safeOrigin}
+          vehicleType="ambulance"
+          activeAmbulanceAlert={mapState.activeAmbulance}
+          center={[safeOrigin.lat, safeOrigin.lng]}
+          zoom={14}
           className="w-full h-full"
         />
       </div>

@@ -3,6 +3,8 @@ import { useNavigate } from 'react-router-dom';
 import AppHeader from '@/components/AppHeader';
 import BottomNavigation from '@/components/BottomNavigation';
 import BottomSheet from '@/components/BottomSheet';
+import LeafletMap from '@/components/LeafletMap';
+import { useApp } from '@/context/AppContext';
 import { liveMapMarkers } from '@/data/mockData';
 import type { MapMarker } from '@/types';
 import { Ambulance, Flame, Shield, Hospital, Siren, MapPin, Navigation, Phone } from 'lucide-react';
@@ -29,6 +31,12 @@ const markerColors = {
 
 export default function LiveMapPage() {
   const navigate = useNavigate();
+  const { mapState } = useApp();
+  const safeOrigin = mapState?.origin || {
+    lat: 21.2514,
+    lng: 81.6296,
+    name: 'Raipur Urban Center'
+  };
   const [selected, setSelected] = useState<MapMarker | null>(null);
 
   return (
@@ -55,53 +63,19 @@ export default function LiveMapPage() {
 
       {/* Map */}
       <div className="px-5 pt-4">
-        <div className="relative w-full h-[420px] rounded-2xl overflow-hidden bg-[#e8eef5] shadow-card">
-          {/* Map background */}
-          <div className="absolute inset-0">
-            <div className="absolute top-1/2 left-0 right-0 h-3 bg-gray-300/60 -translate-y-1/2" />
-            <div className="absolute top-0 bottom-0 left-1/2 w-3 bg-gray-300/60 -translate-x-1/2" />
-            <div className="absolute top-[25%] left-0 right-0 h-2 bg-gray-300/40" />
-            <div className="absolute top-0 bottom-0 left-[25%] w-2 bg-gray-300/40" />
-            <div className="absolute top-0 bottom-0 left-[75%] w-2 bg-gray-300/40" />
-            <div className="absolute top-[75%] left-0 right-0 h-2 bg-gray-300/40" />
-            <div className="absolute top-[5%] left-[5%] w-[15%] h-[15%] bg-green-100/50 rounded-lg" />
-            <div className="absolute top-[5%] right-[5%] w-[15%] h-[15%] bg-blue-100/40 rounded-lg" />
-            <div className="absolute bottom-[5%] left-[5%] w-[15%] h-[15%] bg-orange-100/40 rounded-lg" />
-            <div className="absolute bottom-[5%] right-[5%] w-[15%] h-[15%] bg-green-100/50 rounded-lg" />
-            <div className="absolute top-[30%] left-[30%] w-[15%] h-[15%] bg-gray-200/40 rounded-lg" />
-            <div className="absolute top-[55%] right-[30%] w-[15%] h-[15%] bg-gray-200/40 rounded-lg" />
-            <div className="absolute top-[48%] left-[20%] w-2.5 h-2.5 bg-emergency-400 rounded-full animate-pulse" />
-            <div className="absolute top-[48%] right-[30%] w-2.5 h-2.5 bg-orange-400 rounded-full" />
-            <div className="absolute top-[22%] left-[48%] w-2.5 h-2.5 bg-green-400 rounded-full" />
-          </div>
-
-          {/* Markers */}
-          {liveMapMarkers.map((marker) => {
-            const Icon = markerIcons[marker.type];
-            const color = markerColors[marker.type];
-            const isUser = marker.type === 'user';
-            return (
-              <button
-                key={marker.id}
-                onClick={() => setSelected(marker)}
-                className="absolute -translate-x-1/2 -translate-y-1/2 active:scale-90 transition-transform"
-                style={{ left: `${marker.position.x}%`, top: `${marker.position.y}%` }}
-              >
-                {isUser ? (
-                  <div className="relative">
-                    <div className="absolute inset-0 w-7 h-7 bg-blue-400/30 rounded-full animate-ping" />
-                    <div className="w-7 h-7 bg-blue-500 rounded-full flex items-center justify-center shadow-lg ring-4 ring-white relative z-10">
-                      <Icon size={14} className="text-white" />
-                    </div>
-                  </div>
-                ) : (
-                  <div className={`${color} w-9 h-9 rounded-full flex items-center justify-center shadow-lg ring-[3px] ring-white ${marker.type === 'fire_incident' || marker.type === 'emergency' ? 'animate-pulse' : ''}`}>
-                    <Icon size={16} className="text-white" strokeWidth={2.5} />
-                  </div>
-                )}
-              </button>
-            );
-          })}
+        <div className="relative w-full h-[440px] rounded-2xl overflow-hidden shadow-card border border-slate-200">
+          <LeafletMap
+            origin={safeOrigin}
+            destination={mapState.destination}
+            primaryRoute={mapState.primaryRoute}
+            alternativeRoutes={mapState.alternativeRoutes}
+            vehicleLocation={safeOrigin}
+            vehicleType={mapState.vehicleType}
+            activeAmbulanceAlert={mapState.activeAmbulance}
+            center={[safeOrigin.lat, safeOrigin.lng]}
+            zoom={14}
+            className="w-full h-full"
+          />
         </div>
       </div>
 
@@ -137,7 +111,10 @@ export default function LiveMapPage() {
               )}
             </div>
             <div className="flex gap-3 mt-4">
-              <button className="flex-1 btn-primary flex items-center justify-center gap-2">
+              <button
+                onClick={() => navigate('/navigate')}
+                className="flex-1 btn-primary flex items-center justify-center gap-2"
+              >
                 <Navigation size={18} />
                 Navigate
               </button>

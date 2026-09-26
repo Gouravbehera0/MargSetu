@@ -1,8 +1,9 @@
-import { useState, useEffect, useRef, useCallback } from 'react';
+import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import NavigationNavbar from '@/components/NavigationNavbar';
 import HighwayCorridorBanner from '@/components/HighwayCorridorBanner';
 import LeafletMap from '@/components/LeafletMap';
+import { useApp } from '@/context/AppContext';
 import { optimizeRouteWithQPSO, fetchActiveAmbulanceAlert, stepEmergencyVehicle } from '@/services/apiService';
 import {
   reverseGeocodeLocation,
@@ -231,18 +232,20 @@ export default function MapPlannerPage() {
     };
   }, [handleDragMove, handleDragEnd]);
 
-  const [origin, setOrigin] = useState<GeoPoint>(INITIAL_CITY.center);
-  const [destination, setDestination] = useState<GeoPoint | null>(null);
-  const [presets, setPresets] = useState<PresetDestination[]>(INITIAL_CITY.presets);
-  const [selectedCityId, setSelectedCityId] = useState<string>(INITIAL_CITY.id);
-  const [activeRegionNotice, setActiveRegionNotice] = useState<string>('Raipur, Chhattisgarh');
+  const { mapState, updateMapState } = useApp();
 
-  const [vehicleType, setVehicleType] = useState<GeneralVehicleType>('car');
+  const [origin, setOrigin] = useState<GeoPoint>(mapState.origin || INITIAL_CITY.center);
+  const [destination, setDestination] = useState<GeoPoint | null>(mapState.destination);
+  const [presets, setPresets] = useState<PresetDestination[]>(INITIAL_CITY.presets);
+  const [selectedCityId, setSelectedCityId] = useState<string>(mapState.selectedCityId || INITIAL_CITY.id);
+  const [activeRegionNotice, setActiveRegionNotice] = useState<string>(mapState.activeRegionNotice || 'Raipur, Chhattisgarh');
+
+  const [vehicleType, setVehicleType] = useState<GeneralVehicleType>(mapState.vehicleType || 'car');
   const [preference, setPreference] = useState<RoutePreference>('balanced');
   const [loading, setLoading] = useState(false);
   const [isDetectingLocation, setIsDetectingLocation] = useState(false);
-  const [optimizationResult, setOptimizationResult] = useState<QPSOOptimizationResult | null>(null);
-  const [selectedCandidate, setSelectedCandidate] = useState<RouteCandidateAlternative | null>(null);
+  const [optimizationResult, setOptimizationResult] = useState<QPSOOptimizationResult | null>(mapState.optimizationResult);
+  const [selectedCandidate, setSelectedCandidate] = useState<RouteCandidateAlternative | null>(mapState.selectedCandidate);
 
   // Real-Time Emergency Vehicle Approaching Radar state (for regular users)
   const [activeAmbulance, setActiveAmbulance] = useState<ActiveAmbulanceAlertData | null>(null);
@@ -604,10 +607,52 @@ export default function MapPlannerPage() {
   }
 
   // Active polylines to render on both Mobile and Desktop maps (only when destination is chosen)
-  const activeRoutePolyline = destination ? (selectedCandidate?.coordinates || optimizationResult?.route_geometry) : undefined;
-  const alternativePolylines = destination ? (optimizationResult?.candidate_alternatives
-    ?.filter((c) => c.id !== selectedCandidate?.id)
-    .map((c) => c.coordinates) || []) : [];
+  const activeRoutePolyline = useMemo(() => {
+    return destination ? (selectedCandidate?.coordinates || optimizationResult?.route_geometry) : undefined;
+  }, [destination?.lat, destination?.lng, selectedCandidate?.id, optimizationResult?.primary_route?.name]);
+
+  const alternativePolylines = useMemo(() => {
+    if (!destination || !optimizationResult?.candidate_alternatives) return [];
+    return optimizationResult.candidate_alternatives
+      .filter((c) => c.id !== selectedCandidate?.id)
+      .map((c) => c.coordinates);
+  }, [destination?.lat, destination?.lng, optimizationResult?.candidate_alternatives, selectedCandidate?.id]);
+
+  // Synchronize with global mapState so every page in MargSetu stays in sync
+  useEffect(() => {
+    updateMapState({
+      origin,
+      destination,
+      primaryRoute: activeRoutePolyline,
+      alternativeRoutes: alternativePolylines,
+      vehicleType,
+      activeAmbulance,
+      selectedCityId,
+      activeRegionNotice,
+      optimizationResult,
+      selectedCandidate,
+      trafficEnabled: mobileTrafficEnabled
+    });
+  }, [
+    origin.lat,
+    origin.lng,
+    origin.name,
+    destination?.lat,
+    destination?.lng,
+    destination?.name,
+    activeRoutePolyline,
+    alternativePolylines,
+    vehicleType,
+    activeAmbulance?.distance_meters,
+    activeAmbulance?.eta_seconds,
+    activeAmbulance?.vehicle_id,
+    selectedCityId,
+    activeRegionNotice,
+    optimizationResult?.convergence_time_ms,
+    selectedCandidate?.id,
+    mobileTrafficEnabled,
+    updateMapState
+  ]);
 
   const handleStartNavigation = () => {
     if (!destination) return;
@@ -1287,10 +1332,10 @@ export default function MapPlannerPage() {
 
         {/* 7. Mobile Slide-in Menu Drawer */}
         {isMobileMenuOpen && (
-          <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-xs flex">
-            <div className="w-[82%] max-w-[320px] bg-white h-full shadow-2xl flex flex-col p-5">
+          <div className="fixed inset-0 z-[2000] bg-black/60 backdrop-blur-xs flex pointer-events-auto">
+            <div className="w-[82%] max-w-[320px] bg-white h-full shadow-2xl flex flex-col p-5 z-[2001] pointer-events-auto">
               {/* Header */}
-              <div className="flex items-center justify-between pb-4 border-b border-slate-100">
+              <div className="flex items-center justify-between pb-4 border-b border-slate-100 shrink-0">
                 <div className="flex items-center space-x-2">
                   <div className="w-8 h-8 rounded-xl bg-blue-600 text-white flex items-center justify-center font-black text-sm shadow-md">
                     M
@@ -1303,7 +1348,7 @@ export default function MapPlannerPage() {
                 <button
                   type="button"
                   onClick={() => setIsMobileMenuOpen(false)}
-                  className="p-1.5 rounded-full hover:bg-slate-100 text-slate-500"
+                  className="p-1.5 rounded-full hover:bg-slate-100 text-slate-500 cursor-pointer active:scale-95"
                 >
                   <X className="w-5 h-5" />
                 </button>
@@ -1320,11 +1365,13 @@ export default function MapPlannerPage() {
                       <button
                         key={city.id}
                         type="button"
-                        onClick={() => {
+                        onClick={(e) => {
+                          e.preventDefault();
+                          e.stopPropagation();
                           handleSelectCity(city.id);
                           setIsMobileMenuOpen(false);
                         }}
-                        className={`text-xs px-2.5 py-2 rounded-xl font-bold transition-all text-left truncate ${
+                        className={`text-xs px-2.5 py-2 rounded-xl font-bold transition-all text-left truncate cursor-pointer active:scale-95 ${
                           selectedCityId === city.id
                             ? 'bg-blue-600 text-white shadow-sm'
                             : 'bg-slate-50 text-slate-700 hover:bg-slate-100 border border-slate-200'
@@ -1356,11 +1403,13 @@ export default function MapPlannerPage() {
                         <button
                           key={item.path}
                           type="button"
-                          onClick={() => {
-                            navigate(item.path);
+                          onClick={(e) => {
+                            e.preventDefault();
+                            e.stopPropagation();
                             setIsMobileMenuOpen(false);
+                            navigate(item.path);
                           }}
-                          className="w-full flex items-center space-x-3 px-3 py-2.5 rounded-xl hover:bg-slate-50 text-slate-700 text-xs font-semibold transition-all text-left"
+                          className="w-full flex items-center space-x-3 px-3 py-2.5 rounded-xl hover:bg-slate-100 active:bg-blue-50 text-slate-700 text-xs font-semibold transition-all text-left cursor-pointer active:scale-98"
                         >
                           <Icon className="w-4 h-4 text-slate-500" />
                           <span>{item.label}</span>
@@ -1372,7 +1421,7 @@ export default function MapPlannerPage() {
               </div>
             </div>
             {/* Backdrop Dismiss */}
-            <div className="flex-1" onClick={() => setIsMobileMenuOpen(false)} />
+            <div className="flex-1 cursor-pointer" onClick={() => setIsMobileMenuOpen(false)} />
           </div>
         )}
       </div>

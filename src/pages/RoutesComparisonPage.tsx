@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import NavigationNavbar from '@/components/NavigationNavbar';
 import LeafletMap from '@/components/LeafletMap';
+import { useApp } from '@/context/AppContext';
 import {
   GitFork,
   CheckCircle2,
@@ -102,7 +103,13 @@ const COMPARISON_ROUTES: RouteRow[] = [
 ];
 
 export default function RoutesComparisonPage() {
+  const { mapState } = useApp();
   const navigate = useNavigate();
+  const safeOrigin = mapState?.origin || {
+    lat: 21.2514,
+    lng: 81.6296,
+    name: 'Raipur Urban Center'
+  };
   const [selectedRoute, setSelectedRoute] = useState<RouteRow>(COMPARISON_ROUTES[0]);
 
   return (
@@ -268,7 +275,14 @@ export default function RoutesComparisonPage() {
 
           <div className="lg:col-span-7 bg-white rounded-2xl p-4 shadow-sm border border-slate-200 min-h-[400px]">
             <LeafletMap
+              origin={safeOrigin}
+              destination={mapState.destination}
               primaryRoute={selectedRoute.coordinates}
+              alternativeRoutes={COMPARISON_ROUTES.filter(r => r.id !== selectedRoute.id).map(r => r.coordinates)}
+              vehicleLocation={safeOrigin}
+              vehicleType={mapState.vehicleType}
+              activeAmbulanceAlert={mapState.activeAmbulance}
+              center={[safeOrigin.lat, safeOrigin.lng]}
               className="w-full h-full min-h-[380px] rounded-xl"
             />
           </div>

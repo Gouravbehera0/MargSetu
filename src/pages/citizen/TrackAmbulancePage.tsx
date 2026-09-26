@@ -1,14 +1,19 @@
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { ChevronLeft, Phone, X, Ambulance, Navigation, Clock, MapPin } from 'lucide-react';
-import MapMock from '@/components/MapMock';
+import LeafletMap from '@/components/LeafletMap';
 import StatusBadge from '@/components/StatusBadge';
 import { useApp } from '@/context/AppContext';
 import { fetchVehicles, cancelRequest } from '@/services/supabaseQueries';
 
 export default function TrackAmbulancePage() {
   const navigate = useNavigate();
-  const { currentRequest } = useApp();
+  const { currentRequest, mapState } = useApp();
+  const safeOrigin = mapState?.origin || {
+    lat: 21.2514,
+    lng: 81.6296,
+    name: 'Raipur Urban Center'
+  };
   const [vehicle, setVehicle] = useState<{ code: string; driver_name: string; driver_phone: string; eta: string | null; distance: string | null } | null>(null);
   const [progress, setProgress] = useState(0);
   const [eta, setEta] = useState('05:42');
@@ -72,15 +77,20 @@ export default function TrackAmbulancePage() {
 
       {/* Map */}
       <div className="px-5 -mt-2">
-        <MapMock
-          markers={[
-            { id: 'amb', type: 'ambulance', label: vehicleCode, position: { x: 30, y: 35 } },
-            { id: 'dest', type: 'hospital', label: 'City Hospital', position: { x: 60, y: 75 } },
-          ]}
-          showRoute
-          className="h-72 shadow-card"
-          animatedVehicle
-        />
+        <div className="h-72 rounded-2xl overflow-hidden shadow-card border border-slate-200 relative">
+          <LeafletMap
+            origin={safeOrigin}
+            destination={mapState.destination}
+            primaryRoute={mapState.primaryRoute}
+            alternativeRoutes={mapState.alternativeRoutes}
+            vehicleLocation={mapState.activeAmbulance?.ambulance_location || safeOrigin}
+            vehicleType="ambulance"
+            activeAmbulanceAlert={mapState.activeAmbulance}
+            center={[safeOrigin.lat, safeOrigin.lng]}
+            zoom={14}
+            className="w-full h-full"
+          />
+        </div>
       </div>
 
       {/* Progress bar */}

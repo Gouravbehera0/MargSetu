@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { ChevronLeft, AlertTriangle, Clock, ArrowDown, Check, X } from 'lucide-react';
-import MapMock from '@/components/MapMock';
+import LeafletMap from '@/components/LeafletMap';
 import LoadingState from '@/components/LoadingState';
 import { mockRerouteService } from '@/services/mockServices';
 import { useApp } from '@/context/AppContext';
@@ -16,7 +16,12 @@ interface RerouteResult {
 
 export default function DynamicReroutingPage() {
   const navigate = useNavigate();
-  const { activeRoute, setActiveRoute, showToast } = useApp();
+  const { activeRoute, setActiveRoute, showToast, mapState } = useApp();
+  const safeOrigin = mapState?.origin || {
+    lat: 21.2514,
+    lng: 81.6296,
+    name: 'Raipur Urban Center'
+  };
   const [loading, setLoading] = useState(true);
   const [data, setData] = useState<RerouteResult | null>(null);
   const [accepted, setAccepted] = useState(false);
@@ -103,15 +108,20 @@ export default function DynamicReroutingPage() {
 
             {/* Map preview */}
             <div className="px-5 pt-4">
-              <MapMock
-                markers={[
-                  { id: 'amb', type: 'ambulance', label: 'A102', position: { x: 30, y: 35 } },
-                  { id: 'hosp', type: 'hospital', label: 'City Hospital', position: { x: 60, y: 75 } },
-                ]}
-                showRoute
-                className="h-40 shadow-card"
-                animatedVehicle
-              />
+              <div className="h-44 rounded-2xl overflow-hidden shadow-card border border-slate-200 relative">
+                <LeafletMap
+                  origin={safeOrigin}
+                  destination={mapState.destination}
+                  primaryRoute={mapState.primaryRoute}
+                  alternativeRoutes={mapState.alternativeRoutes}
+                  vehicleLocation={mapState.activeAmbulance?.ambulance_location || safeOrigin}
+                  vehicleType="ambulance"
+                  activeAmbulanceAlert={mapState.activeAmbulance}
+                  center={[safeOrigin.lat, safeOrigin.lng]}
+                  zoom={14}
+                  className="w-full h-full"
+                />
+              </div>
             </div>
 
             {/* Buttons */}
