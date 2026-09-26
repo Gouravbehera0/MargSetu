@@ -1,7 +1,7 @@
 import React, { useEffect, useRef, useState, useCallback } from 'react';
 import L from 'leaflet';
 import type { GeoPoint, GeneralVehicleType, ActiveAmbulanceAlertData, RoadSegmentIntelligence } from '@/types';
-import { Plus, Minus, Crosshair, Siren, MapPin, Activity } from 'lucide-react';
+import { Plus, Minus, Crosshair, Siren, MapPin, Activity, GripHorizontal } from 'lucide-react';
 import { fetchTrafficStatuses } from '@/services/apiService';
 
 interface LeafletMapProps {
@@ -24,6 +24,7 @@ interface LeafletMapProps {
   showTrafficLayer?: boolean;
   trafficSegments?: any[];
   onSegmentClick?: (segment: any) => void;
+  zoomControlsClassName?: string;
 }
 
 export default function LeafletMap({
@@ -45,7 +46,8 @@ export default function LeafletMap({
   onSelectAlternative,
   showTrafficLayer = true,
   trafficSegments,
-  onSegmentClick
+  onSegmentClick,
+  zoomControlsClassName,
 }: LeafletMapProps) {
 
   const mapContainerRef = useRef<HTMLDivElement>(null);
@@ -56,6 +58,47 @@ export default function LeafletMap({
   const [currentZoom, setCurrentZoom] = useState<number>(zoom);
   const [trafficEnabled, setTrafficEnabled] = useState<boolean>(showTrafficLayer);
   const [internalTrafficSegments, setInternalTrafficSegments] = useState<any[]>(trafficSegments || []);
+
+  // Zoom Controls Position & Free Dragging
+  const [zoomOffset, setZoomOffset] = useState<{ x: number; y: number }>({ x: 0, y: 0 });
+  const [isDraggingZoom, setIsDraggingZoom] = useState(false);
+  const dragStartRef = useRef<{ startX: number; startY: number; initX: number; initY: number } | null>(null);
+
+  const handlePointerDown = useCallback((e: React.PointerEvent<HTMLDivElement>) => {
+    if (e.button !== 0) return;
+    e.stopPropagation();
+    try {
+      (e.currentTarget as HTMLDivElement).setPointerCapture(e.pointerId);
+    } catch {}
+    dragStartRef.current = {
+      startX: e.clientX,
+      startY: e.clientY,
+      initX: zoomOffset.x,
+      initY: zoomOffset.y,
+    };
+    setIsDraggingZoom(true);
+  }, [zoomOffset]);
+
+  const handlePointerMove = useCallback((e: React.PointerEvent<HTMLDivElement>) => {
+    if (!dragStartRef.current) return;
+    e.stopPropagation();
+    const dx = e.clientX - dragStartRef.current.startX;
+    const dy = e.clientY - dragStartRef.current.startY;
+    setZoomOffset({
+      x: dragStartRef.current.initX + dx,
+      y: dragStartRef.current.initY + dy,
+    });
+  }, []);
+
+  const handlePointerUp = useCallback((e: React.PointerEvent<HTMLDivElement>) => {
+    if (dragStartRef.current) {
+      try {
+        (e.currentTarget as HTMLDivElement).releasePointerCapture(e.pointerId);
+      } catch {}
+      dragStartRef.current = null;
+      setIsDraggingZoom(false);
+    }
+  }, []);
 
   useEffect(() => {
     if (trafficSegments && trafficSegments.length > 0) {
@@ -621,8 +664,8 @@ export default function LeafletMap({
       {/* Map Surface */}
       <div ref={mapContainerRef} className="w-full h-full min-h-[350px]" />
 
-      {/* Floating Traffic Flow Toggle Pill */}
-      <div className="absolute top-3 right-3 z-[1000]">
+      {/* Floating Traffic Flow Toggle Pill (Desktop/Tablet) */}
+      <div className="hidden sm:block absolute top-3 right-3 z-[1000]">
         <button
           type="button"
           onClick={() => setTrafficEnabled((prev) => !prev)}
@@ -639,23 +682,48 @@ export default function LeafletMap({
         </button>
       </div>
 
-      {/* Floating Smooth Zoom & Framing Control Widget */}
-      <div className="absolute top-3 left-3 z-[1000] flex flex-col items-center bg-white/95 backdrop-blur-md rounded-2xl shadow-xl border border-slate-200/90 overflow-hidden text-slate-700 divide-y divide-slate-100 select-none">
+      {/* Floating Smooth Zoom & Framing Control Widget (Shifted down on mobile & interactively draggable) */}
+      <div
+        className={`absolute top-[calc(max(env(safe-area-inset-top),4px)+72px)] sm:top-3.5 left-3 z-[1000] flex flex-col items-center bg-white/95 backdrop-blur-md rounded-2xl shadow-xl border border-slate-200/90 overflow-hidden text-slate-700 divide-y divide-slate-100 select-none will-change-transform transition-shadow ${
+          isDraggingZoom ? 'shadow-2xl ring-2 ring-blue-500/50 scale-[1.03]' : ''
+        } ${zoomControlsClassName || ''}`}
+        style={{
+          transform: `translate3d(${zoomOffset.x}px, ${zoomOffset.y}px, 0)`,
+          touchAction: 'none',
+        }}
+      >
+        {/* Subtle Grip Drag Handle */}
+        <div
+          onPointerDown={handlePointerDown}
+          onPointerMove={handlePointerMove}
+          onPointerUp={handlePointerUp}
+          onPointerCancel={handlePointerUp}
+          className="w-full py-1.5 px-2 bg-slate-50/90 hover:bg-slate-100/90 active:bg-blue-50 cursor-grab active:cursor-grabbing flex items-center justify-center text-slate-400 hover:text-slate-600 transition-colors touch-none"
+          title="Drag to reposition zoom controls"
+          aria-label="Drag Zoom Controls"
+        >
+          <GripHorizontal className="w-3.5 h-2.5 opacity-60 hover:opacity-100" />
+        </div>
+
         {/* Zoom In */}
         <button
           type="button"
           onClick={handleZoomIn}
-          className="p-2.5 hover:bg-slate-100 active:bg-slate-200 transition-all text-slate-700 hover:text-blue-600 focus:outline-none"
+          className="p-2.5 hover:bg-slate-100 active:bg-slate-200 transition-all text-slate-700 hover:text-blue-600 focus:outline-none cursor-pointer"
           title="Zoom In (+0.5x)"
           aria-label="Zoom In"
         >
           <Plus className="w-4 h-4" />
         </button>
 
-        {/* Current Zoom Level Display */}
+        {/* Current Zoom Level Display (also draggable) */}
         <div
-          className="px-2 py-0.5 text-[10px] font-black text-slate-500 bg-slate-50/90 cursor-default tracking-tight"
-          title={`Zoom Level: ${currentZoom}x`}
+          onPointerDown={handlePointerDown}
+          onPointerMove={handlePointerMove}
+          onPointerUp={handlePointerUp}
+          onPointerCancel={handlePointerUp}
+          className="w-full px-2 py-0.5 text-[10px] font-black text-slate-500 bg-slate-50/90 cursor-grab active:cursor-grabbing tracking-tight text-center touch-none select-none hover:text-blue-600"
+          title={`Zoom Level: ${currentZoom}x (Drag to reposition)`}
         >
           {currentZoom}x
         </div>
@@ -664,7 +732,7 @@ export default function LeafletMap({
         <button
           type="button"
           onClick={handleZoomOut}
-          className="p-2.5 hover:bg-slate-100 active:bg-slate-200 transition-all text-slate-700 hover:text-blue-600 focus:outline-none"
+          className="p-2.5 hover:bg-slate-100 active:bg-slate-200 transition-all text-slate-700 hover:text-blue-600 focus:outline-none cursor-pointer"
           title="Zoom Out (-0.5x)"
           aria-label="Zoom Out"
         >
@@ -675,7 +743,7 @@ export default function LeafletMap({
         <button
           type="button"
           onClick={handleFitRoute}
-          className="p-2.5 hover:bg-blue-50 active:bg-blue-100 transition-all text-slate-700 hover:text-blue-600 focus:outline-none"
+          className="p-2.5 hover:bg-blue-50 active:bg-blue-100 transition-all text-slate-700 hover:text-blue-600 focus:outline-none cursor-pointer"
           title="Frame Entire Route (Fit View)"
           aria-label="Fit Route"
         >
@@ -687,7 +755,7 @@ export default function LeafletMap({
           <button
             type="button"
             onClick={handleFocusAmbulance}
-            className="p-2.5 hover:bg-red-50 active:bg-red-100 transition-all text-red-600 focus:outline-none group relative"
+            className="p-2.5 hover:bg-red-50 active:bg-red-100 transition-all text-red-600 focus:outline-none group relative cursor-pointer"
             title="Fly to Emergency Ambulance (🚑)"
             aria-label="Focus Ambulance"
           >
