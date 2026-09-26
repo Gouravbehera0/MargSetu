@@ -1,6 +1,8 @@
-import React, { useEffect, useRef } from 'react';
+import React, { useEffect, useRef, useState, useCallback } from 'react';
 import L from 'leaflet';
-import type { GeoPoint, GeneralVehicleType, ActiveAmbulanceAlertData } from '@/types';
+import type { GeoPoint, GeneralVehicleType, ActiveAmbulanceAlertData, RoadSegmentIntelligence } from '@/types';
+import { Plus, Minus, Crosshair, Siren, MapPin, Activity } from 'lucide-react';
+import { fetchTrafficStatuses } from '@/services/apiService';
 
 interface LeafletMapProps {
   origin?: GeoPoint | null;
@@ -19,6 +21,9 @@ interface LeafletMapProps {
   center?: [number, number];
   onMapClick?: (lat: number, lng: number) => void;
   onSelectAlternative?: (index: number) => void;
+  showTrafficLayer?: boolean;
+  trafficSegments?: any[];
+  onSegmentClick?: (segment: any) => void;
 }
 
 export default function LeafletMap({
@@ -37,14 +42,34 @@ export default function LeafletMap({
   zoom = 13,
   center = [20.285, 85.83],
   onMapClick,
-  onSelectAlternative
+  onSelectAlternative,
+  showTrafficLayer = true,
+  trafficSegments,
+  onSegmentClick
 }: LeafletMapProps) {
 
   const mapContainerRef = useRef<HTMLDivElement>(null);
   const mapInstanceRef = useRef<L.Map | null>(null);
   const layerGroupRef = useRef<L.LayerGroup | null>(null);
+  const routeBoundsRef = useRef<L.LatLngBounds | null>(null);
+  const lastRouteKeyRef = useRef<string>('');
+  const [currentZoom, setCurrentZoom] = useState<number>(zoom);
+  const [trafficEnabled, setTrafficEnabled] = useState<boolean>(showTrafficLayer);
+  const [internalTrafficSegments, setInternalTrafficSegments] = useState<any[]>(trafficSegments || []);
 
-  // Initialize Map
+  useEffect(() => {
+    if (trafficSegments && trafficSegments.length > 0) {
+      setInternalTrafficSegments(trafficSegments);
+    } else {
+      fetchTrafficStatuses().then((data) => {
+        if (data && data.length > 0) {
+          setInternalTrafficSegments(data);
+        }
+      });
+    }
+  }, [trafficSegments]);
+
+  // Initialize Map with Smooth Fractional Zooming
   useEffect(() => {
     if (!mapContainerRef.current) return;
     if (mapInstanceRef.current) return; // already initialized
@@ -54,9 +79,25 @@ export default function LeafletMap({
       : center;
 
     const map = L.map(mapContainerRef.current, {
-      zoomControl: true,
-      attributionControl: false
+      zoomControl: false,       // Controlled via smooth modern floating widget
+      attributionControl: false,
+      zoomSnap: 0.25,           // Fractional zoom increments for buttery precision
+      zoomDelta: 0.5,           // Smooth half-step on zoom actions
+      wheelPxPerZoomLevel: 120, // Controlled, fluid mouse wheel & trackpad pinch zoom
+      wheelDebounceTime: 40,    // Debounce to prevent scroll wheel stutter
+      zoomAnimation: true,
+      zoomAnimationThreshold: 5,
+      fadeAnimation: true,
+      markerZoomAnimation: true,
+      inertia: true,
+      inertiaDeceleration: 3000,
+      inertiaMaxSpeed: 2000,
+      easeLinearity: 0.2
     }).setView(initialCenter, zoom);
+
+    map.on('zoomend', () => {
+      setCurrentZoom(Math.round(map.getZoom() * 10) / 10);
+    });
 
     // 100% Free, OpenStreetMap Standard Tiles (Zero API Key, Zero Watermarks)
     const baseTileLayer = L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
@@ -128,6 +169,76 @@ export default function LeafletMap({
     layers.clearLayers();
 
     const boundsPoints: L.LatLngExpression[] = [];
+
+    // 0. Render AI Traffic Flow Layer (Green / Yellow / Orange / Red)
+    if (trafficEnabled && internalTrafficSegments && internalTrafficSegments.length > 0) {
+      internalTrafficSegments.forEach((seg) => {
+        if (seg.coordinates && seg.coordinates.length >= 2) {
+          const levelStr = (seg.traffic_level || 'Normal').toString().toLowerCase();
+          let color = '#22c55e'; // Normal (Green)
+          if (levelStr === 'moderate' || levelStr === 'medium') color = '#eab308'; // Moderate (Yellow)
+          else if (levelStr === 'heavy' || levelStr === 'high') color = '#f97316'; // Heavy (Orange)
+          else if (levelStr === 'severe' || levelStr === 'blocked') color = '#ef4444'; // Severe (Red)
+
+          const refSpeed = seg.reference_speed_kmh || seg.speed_limit_kmh || 45;
+          const currSpeed = seg.current_average_speed_kmh !== undefined ? seg.current_average_speed_kmh : Math.round(refSpeed * (1 - (seg.congestion_factor || 0.1)));
+          const obsCount = seg.observations_count !== undefined ? seg.observations_count : (seg.active_observations || 0);
+          const congScore = seg.congestion_score !== undefined ? seg.congestion_score : Math.round((seg.congestion_factor || 0.1) * 100);
+          const confScore = seg.confidence_score !== undefined ? seg.confidence_score : 85;
+          const roadName = seg.road_name || seg.name || 'Road Segment';
+          const displayLevel = seg.traffic_level ? (seg.traffic_level.charAt(0).toUpperCase() + seg.traffic_level.slice(1)) : 'Normal';
+
+          const trafficPoly = L.polyline(seg.coordinates, {
+            color: color,
+            weight: 6,
+            opacity: 0.82,
+            lineCap: 'round',
+            lineJoin: 'round'
+          }).bindPopup(`
+            <div class="p-2.5 font-sans min-w-[210px] text-slate-800">
+              <div class="flex items-center justify-between pb-1.5 border-b border-slate-100">
+                <span class="font-bold text-xs text-slate-900">${roadName}</span>
+                <span class="text-[10px] px-1.5 py-0.5 rounded font-black uppercase" style="background-color: ${color}22; color: ${color}">${displayLevel}</span>
+              </div>
+              <div class="mt-2 space-y-1.5 text-xs">
+                <div class="flex justify-between">
+                  <span class="text-slate-500">Reference Speed:</span>
+                  <span class="font-semibold text-slate-700">${refSpeed} km/h</span>
+                </div>
+                <div class="flex justify-between">
+                  <span class="text-slate-500">Current Average Speed:</span>
+                  <span class="font-bold" style="color: ${color}">${currSpeed} km/h</span>
+                </div>
+                <div class="flex justify-between">
+                  <span class="text-slate-500">Observations:</span>
+                  <span class="font-semibold text-slate-700">${obsCount}</span>
+                </div>
+                <div class="flex justify-between">
+                  <span class="text-slate-500">Traffic Level:</span>
+                  <span class="font-bold" style="color: ${color}">${displayLevel}</span>
+                </div>
+                <div class="flex justify-between">
+                  <span class="text-slate-500">Congestion Score:</span>
+                  <span class="font-bold text-slate-800">${congScore}/100</span>
+                </div>
+                <div class="flex justify-between">
+                  <span class="text-slate-500">Confidence:</span>
+                  <span class="font-semibold text-emerald-600">${confScore}%</span>
+                </div>
+              </div>
+            </div>
+          `);
+
+          if (onSegmentClick) {
+            trafficPoly.on('click', () => {
+              onSegmentClick(seg);
+            });
+          }
+
+          layers.addLayer(trafficPoly);
+        }
+      });
+    }
 
     // 1. Render Alternative Candidate Routes with distinctive colors
     const altPalette = [
@@ -301,7 +412,7 @@ export default function LeafletMap({
     });
 
     // 8. Render Active Ambulance Emergency Clearway Corridor, Direction Arrow, Moving Marker & ETA
-    if (activeAmbulanceAlert && activeAmbulanceAlert.has_active_ambulance) {
+    if (activeAmbulanceAlert && activeAmbulanceAlert.has_active_ambulance && activeAmbulanceAlert.is_relevant_to_user) {
       const ambRoute = activeAmbulanceAlert.active_route_geometry;
       if (ambRoute && ambRoute.length >= 2) {
         // Outer glowing red aura
@@ -398,7 +509,6 @@ export default function LeafletMap({
             </div>
           `);
         layers.addLayer(ambMarker);
-        boundsPoints.push([ambLoc.lat, ambLoc.lng]);
 
         // Emergency Proximity Circle around ambulance
         if (activeAmbulanceAlert.is_relevant_to_user) {
@@ -415,19 +525,31 @@ export default function LeafletMap({
       }
     }
 
-    // Force size recalculation and auto fit bounds if route/points exist
+    // Force size recalculation
     map.invalidateSize();
 
+    // Cache route bounds for framing
     if (boundsPoints.length >= 2) {
-      try {
-        map.fitBounds(L.latLngBounds(boundsPoints), {
-          padding: [50, 50],
-          maxZoom: 15,
-          animate: true
-        });
-      } catch (e) {}
-    } else if (origin) {
-      map.setView([origin.lat, origin.lng], 13);
+      routeBoundsRef.current = L.latLngBounds(boundsPoints);
+    }
+
+    // Crucial: Only auto-fit bounds when route key actually changes (new origin, destination, or new route computed)
+    // NEVER re-fit bounds on polling ticks or ambulance steps so user zoom and pan remain completely smooth and uninterrupted!
+    const routeKey = `${origin?.lat.toFixed(4)},${origin?.lng.toFixed(4)}_${destination?.lat.toFixed(4)},${destination?.lng.toFixed(4)}_${primaryRoute?.length || 0}_${alternativeRoutes.length}`;
+
+    if (routeKey !== lastRouteKeyRef.current) {
+      lastRouteKeyRef.current = routeKey;
+      if (routeBoundsRef.current && routeBoundsRef.current.isValid()) {
+        try {
+          map.fitBounds(routeBoundsRef.current, {
+            padding: [45, 45],
+            maxZoom: 15,
+            animate: true
+          });
+        } catch (e) {}
+      } else if (origin) {
+        map.setView([origin.lat, origin.lng], 13);
+      }
     }
 
     const timer = setTimeout(() => {
@@ -448,16 +570,130 @@ export default function LeafletMap({
     incidents,
     citizens,
     alertRadiusMeters,
-    showEmergencyRadius
+    showEmergencyRadius,
+    trafficEnabled,
+    internalTrafficSegments,
+    onSegmentClick
   ]);
 
+  // Smooth Zoom & Framing Action Handlers
+  const handleZoomIn = useCallback(() => {
+    if (mapInstanceRef.current) {
+      mapInstanceRef.current.zoomIn(0.5, { animate: true });
+    }
+  }, []);
+
+  const handleZoomOut = useCallback(() => {
+    if (mapInstanceRef.current) {
+      mapInstanceRef.current.zoomOut(0.5, { animate: true });
+    }
+  }, []);
+
+  const handleFitRoute = useCallback(() => {
+    if (!mapInstanceRef.current) return;
+    if (routeBoundsRef.current && routeBoundsRef.current.isValid()) {
+      mapInstanceRef.current.flyToBounds(routeBoundsRef.current, {
+        padding: [45, 45],
+        maxZoom: 15.5,
+        duration: 0.8,
+        easeLinearity: 0.25
+      });
+    } else if (origin) {
+      mapInstanceRef.current.flyTo([origin.lat, origin.lng], 13.5, { duration: 0.8 });
+    }
+  }, [origin]);
+
+  const handleFocusAmbulance = useCallback(() => {
+    if (!mapInstanceRef.current || !activeAmbulanceAlert?.ambulance_location) return;
+    const loc = activeAmbulanceAlert.ambulance_location;
+    mapInstanceRef.current.flyTo([loc.lat, loc.lng], 15.5, {
+      duration: 0.9,
+      easeLinearity: 0.2
+    });
+  }, [activeAmbulanceAlert]);
 
   return (
     <div
       className={`relative overflow-hidden shadow-inner border border-slate-200 z-0 ${className}`}
       style={{ isolation: 'isolate' }}
     >
+      {/* Map Surface */}
       <div ref={mapContainerRef} className="w-full h-full min-h-[350px]" />
+
+      {/* Floating Traffic Flow Toggle Pill */}
+      <div className="absolute top-3 right-3 z-[1000]">
+        <button
+          type="button"
+          onClick={() => setTrafficEnabled((prev) => !prev)}
+          className={`flex items-center space-x-1.5 px-3 py-1.5 rounded-xl shadow-lg border text-xs font-bold transition-all backdrop-blur-md cursor-pointer ${
+            trafficEnabled
+              ? 'bg-white/95 text-emerald-700 border-emerald-300 shadow-emerald-500/10'
+              : 'bg-white/80 text-slate-500 border-slate-200 opacity-80'
+          }`}
+          title="Toggle Real-Time AI Traffic Flow Layer"
+          aria-label="Toggle Traffic Flow"
+        >
+          <span className={`w-2 h-2 rounded-full ${trafficEnabled ? 'bg-emerald-500 animate-pulse' : 'bg-slate-300'}`} />
+          <span>Traffic Flow</span>
+        </button>
+      </div>
+
+      {/* Floating Smooth Zoom & Framing Control Widget */}
+      <div className="absolute top-3 left-3 z-[1000] flex flex-col items-center bg-white/95 backdrop-blur-md rounded-2xl shadow-xl border border-slate-200/90 overflow-hidden text-slate-700 divide-y divide-slate-100 select-none">
+        {/* Zoom In */}
+        <button
+          type="button"
+          onClick={handleZoomIn}
+          className="p-2.5 hover:bg-slate-100 active:bg-slate-200 transition-all text-slate-700 hover:text-blue-600 focus:outline-none"
+          title="Zoom In (+0.5x)"
+          aria-label="Zoom In"
+        >
+          <Plus className="w-4 h-4" />
+        </button>
+
+        {/* Current Zoom Level Display */}
+        <div
+          className="px-2 py-0.5 text-[10px] font-black text-slate-500 bg-slate-50/90 cursor-default tracking-tight"
+          title={`Zoom Level: ${currentZoom}x`}
+        >
+          {currentZoom}x
+        </div>
+
+        {/* Zoom Out */}
+        <button
+          type="button"
+          onClick={handleZoomOut}
+          className="p-2.5 hover:bg-slate-100 active:bg-slate-200 transition-all text-slate-700 hover:text-blue-600 focus:outline-none"
+          title="Zoom Out (-0.5x)"
+          aria-label="Zoom Out"
+        >
+          <Minus className="w-4 h-4" />
+        </button>
+
+        {/* Fit Entire Route to Screen */}
+        <button
+          type="button"
+          onClick={handleFitRoute}
+          className="p-2.5 hover:bg-blue-50 active:bg-blue-100 transition-all text-slate-700 hover:text-blue-600 focus:outline-none"
+          title="Frame Entire Route (Fit View)"
+          aria-label="Fit Route"
+        >
+          <Crosshair className="w-4 h-4 text-blue-600" />
+        </button>
+
+        {/* Fly to Active Emergency Ambulance */}
+        {activeAmbulanceAlert?.has_active_ambulance && activeAmbulanceAlert?.ambulance_location && (
+          <button
+            type="button"
+            onClick={handleFocusAmbulance}
+            className="p-2.5 hover:bg-red-50 active:bg-red-100 transition-all text-red-600 focus:outline-none group relative"
+            title="Fly to Emergency Ambulance (🚑)"
+            aria-label="Focus Ambulance"
+          >
+            <Siren className="w-4 h-4 text-red-600 animate-pulse" />
+          </button>
+        )}
+      </div>
     </div>
   );
 }

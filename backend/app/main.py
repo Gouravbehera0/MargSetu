@@ -30,7 +30,8 @@ app.add_middleware(
 
 # Register API Routers
 app.include_router(routes_router)
-app.include_router(traffic_router)
+app.include_router(traffic_router, prefix="/api/traffic")
+app.include_router(traffic_router, prefix="/traffic")
 app.include_router(incidents_router)
 app.include_router(emergency_router)
 app.include_router(benchmark_router)

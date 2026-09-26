@@ -105,11 +105,17 @@ def test_step_ambulance_simulation():
 
 
 def test_emergency_api_active_ambulance():
+    amb = vehicles_db["ev-1"]
+    amb.current_step_index = 0
+    amb.current_location.lat = amb.active_route_geometry[0][0]
+    amb.current_location.lng = amb.active_route_geometry[0][1]
+
     res = client.get("/api/emergency/active-ambulance?user_lat=20.2740&user_lng=85.8300&alert_radius_meters=1000")
     assert res.status_code == 200
     data = res.json()
     assert data["has_active_ambulance"] is True
     assert data["is_relevant_to_user"] is True
+
     assert data["vehicle_code"] == "AMB-108"
     assert "active_route_geometry" in data
     assert "heading_degrees" in data
@@ -126,3 +132,19 @@ def test_emergency_api_step_endpoint():
     assert data["vehicle_id"] == "ev-1"
     assert "heading_degrees" in data
     assert "current_location" in data
+
+
+def test_emergency_api_no_ghost_ambulance():
+    # Sambalpur coordinates: far away from Bhubaneswar
+    res = client.get("/api/emergency/active-ambulance?user_lat=21.4806&user_lng=83.9651&alert_radius_meters=1000")
+    assert res.status_code == 200
+    data = res.json()
+    assert data["has_active_ambulance"] is False
+    assert data["is_relevant_to_user"] is False
+
+    # When simulate=True is explicitly passed, it provides a simulated vehicle
+    res_sim = client.get("/api/emergency/active-ambulance?user_lat=21.4806&user_lng=83.9651&alert_radius_meters=1000&simulate=true")
+    assert res_sim.status_code == 200
+    data_sim = res_sim.json()
+    assert data_sim["has_active_ambulance"] is True
+

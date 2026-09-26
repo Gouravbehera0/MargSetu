@@ -4,7 +4,7 @@ Pydantic schemas and database models for Intelligent Route Optimization.
 """
 from typing import List, Dict, Optional, Any
 from pydantic import BaseModel, Field
-from datetime import datetime
+from datetime import datetime, timezone
 from enum import Enum
 
 
@@ -232,4 +232,78 @@ class ActiveAmbulanceAlertResponse(BaseModel):
     message: str = ""
     give_way_action: str = ""
     is_approaching: bool = True
+
+
+# ==========================================
+# AI-POWERED TRAFFIC ANALYSIS SCHEMAS
+# ==========================================
+
+class AITrafficLevel(str, Enum):
+    NORMAL = "Normal"
+    MODERATE = "Moderate"
+    HEAVY = "Heavy"
+    SEVERE = "Severe"
+
+
+class SpeedObservation(BaseModel):
+    latitude: float
+    longitude: float
+    speed_kmh: float
+    heading_degrees: Optional[float] = None
+    timestamp: Optional[datetime] = Field(default_factory=lambda: datetime.now(timezone.utc))
+    segment_id: Optional[str] = None
+
+
+class RoadSegmentIntelligence(BaseModel):
+    segment_id: str
+    road_name: str
+    reference_speed_kmh: float = 45.0
+    current_average_speed_kmh: float = 45.0
+    historical_average_speed_kmh: float = 42.0
+    active_observations: int = 0
+    traffic_level: str = "Normal"
+    congestion_score: float = 0.0       # 0.0 (free flow) to 100.0 (deadlock)
+    confidence_score: float = 85.0     # 0.0 to 100.0%
+    estimated_travel_time_min: float = 2.0
+    last_updated: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    coordinates: List[List[float]] = []
+    from_node: Optional[str] = None
+    to_node: Optional[str] = None
+    distance_km: float = 1.0
+    is_blocked: bool = False
+
+
+class TrafficPrediction(BaseModel):
+    segment_id: str
+    horizon_minutes: int  # 15 or 30
+    predicted_speed_kmh: float
+    predicted_traffic_level: str
+    predicted_congestion_score: float
+    confidence_score: float
+    trend: str = "STABLE"  # "IMPROVING", "STABLE", "WORSENING"
+    timestamp: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+
+
+class RoadConditionReport(BaseModel):
+    id: str = Field(default_factory=lambda: f"rep-{int(datetime.now(timezone.utc).timestamp()*1000)}")
+    segment_id: Optional[str] = None
+    latitude: float
+    longitude: float
+    report_type: str = "pothole"  # pothole, accident, bad_road, waterlogging, closure
+    severity: str = "medium"      # low, medium, high, critical
+    description: Optional[str] = None
+    timestamp: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    upvotes: int = 1
+    status: str = "active"
+
+
+class TrafficAnalyticsSummary(BaseModel):
+    network_average_speed_kmh: float
+    congested_segments_count: int
+    total_segments_count: int
+    active_observers_count: int
+    top_bottlenecks: List[Dict[str, Any]] = []
+    congestion_distribution: Dict[str, int] = {}
+    system_status: str = "OPTIMAL"
+    timestamp: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 

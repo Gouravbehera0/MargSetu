@@ -6,6 +6,7 @@ from typing import Dict, List, Optional
 from backend.app.database.models import (
     Incident, IncidentType, EmergencyVehicle, VehicleType, GeoPoint, CitizenGiveWayAlert
 )
+from backend.app.emergency.real_corridors import BHUBANESWAR_AMBULANCE_REAL_ROAD
 
 # Seed Incidents
 SEED_INCIDENTS: List[Incident] = [
@@ -47,17 +48,19 @@ SEED_EMERGENCY_VEHICLES: List[EmergencyVehicle] = [
         driver_name="Rajesh Mohanty",
         driver_phone="+91 98765 43210",
         status="on_mission",
-        current_location=GeoPoint(lat=20.2720, lng=85.8280, name="Near AG Square"),
-        destination=GeoPoint(lat=20.3120, lng=85.8180, name="AIIMS Hospital"),
+        current_location=GeoPoint(
+            lat=BHUBANESWAR_AMBULANCE_REAL_ROAD[0][0],
+            lng=BHUBANESWAR_AMBULANCE_REAL_ROAD[0][1],
+            name="Near AG Square Arterial"
+        ),
+        destination=GeoPoint(
+            lat=BHUBANESWAR_AMBULANCE_REAL_ROAD[-1][0],
+            lng=BHUBANESWAR_AMBULANCE_REAL_ROAD[-1][1],
+            name="AIIMS Hospital"
+        ),
         eta_minutes=6.5,
         speed_kmh=70.0,
-        active_route_geometry=[
-            [20.2720, 85.8280],
-            [20.2810, 85.8250],
-            [20.2950, 85.8210],
-            [20.3050, 85.8190],
-            [20.3120, 85.8180]
-        ],
+        active_route_geometry=BHUBANESWAR_AMBULANCE_REAL_ROAD,
         alert_radius_meters=600.0
     ),
     EmergencyVehicle(

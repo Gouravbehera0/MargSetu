@@ -331,4 +331,82 @@ export interface ActiveAmbulanceAlertData {
   is_approaching: boolean;
 }
 
+// ==========================================
+// AI TRAFFIC ANALYSIS & INTELLIGENCE TYPES
+// ==========================================
+
+export interface SpeedObservationPayload {
+  latitude: number;
+  longitude: number;
+  speed_kmh: number;
+  heading_degrees?: number;
+  segment_id?: string;
+  timestamp?: string;
+}
+
+export interface RoadSegmentIntelligence {
+  segment_id: string;
+  road_name: string;
+  reference_speed_kmh: number;
+  current_average_speed_kmh: number;
+  historical_average_speed_kmh: number;
+  active_observations: number;
+  traffic_level: 'Normal' | 'Moderate' | 'Heavy' | 'Severe' | string;
+  congestion_score: number;
+  confidence_score: number;
+  estimated_travel_time_min: number;
+  last_updated: string;
+  coordinates: [number, number][];
+  from_node?: string;
+  to_node?: string;
+  distance_km: number;
+  is_blocked: boolean;
+}
+
+export interface TrafficPredictionItem {
+  segment_id: string;
+  horizon_minutes: number;
+  predicted_speed_kmh: number;
+  predicted_traffic_level: string;
+  predicted_congestion_score: number;
+  confidence_score: number;
+  trend: 'IMPROVING' | 'STABLE' | 'WORSENING' | string;
+  timestamp: string;
+}
+
+export interface RoadConditionReportItem {
+  id: string;
+  segment_id?: string;
+  latitude: number;
+  longitude: number;
+  report_type: 'pothole' | 'accident' | 'bad_road' | 'waterlogging' | 'closure' | string;
+  severity: 'low' | 'medium' | 'high' | 'critical';
+  description?: string;
+  timestamp: string;
+  upvotes: number;
+  status: string;
+}
+
+export interface TrafficBottleneckItem {
+  segment_id: string;
+  name: string;
+  congestion_score: number;
+  current_speed_kmh: number;
+  reference_speed_kmh: number;
+  traffic_level: string;
+  observations: number;
+  confidence_score: number;
+}
+
+export interface TrafficAnalyticsSummaryData {
+  network_average_speed_kmh: number;
+  congested_segments_count: number;
+  total_segments_count: number;
+  active_observers_count: number;
+  top_bottlenecks: TrafficBottleneckItem[];
+  congestion_distribution: Record<string, number>;
+  system_status: string;
+  timestamp: string;
+}
+
 

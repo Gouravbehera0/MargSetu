@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import NavigationNavbar from '@/components/NavigationNavbar';
 import HighwayCorridorBanner from '@/components/HighwayCorridorBanner';
 import LeafletMap from '@/components/LeafletMap';
-import { optimizeRouteWithQPSO } from '@/services/apiService';
+import { optimizeRouteWithQPSO, fetchActiveAmbulanceAlert, stepEmergencyVehicle } from '@/services/apiService';
 import {
   reverseGeocodeLocation,
   searchPlacesAutocomplete,
@@ -18,7 +18,8 @@ import type {
   RoutePreference,
   GeoPoint,
   QPSOOptimizationResult,
-  RouteCandidateAlternative
+  RouteCandidateAlternative,
+  ActiveAmbulanceAlertData
 } from '@/types';
 import {
   Compass,
@@ -46,7 +47,17 @@ import {
   Building2,
   Train,
   Plane,
-  Cross
+  Cross,
+  Radio,
+  Play,
+  Pause,
+  FastForward,
+  RotateCcw,
+  AlertTriangle,
+  Activity,
+  Volume2,
+  CheckCircle2,
+  ShieldAlert
 } from 'lucide-react';
 
 const VEHICLES: { type: GeneralVehicleType; label: string; icon: any; isEmergency?: boolean }[] = [
@@ -90,6 +101,14 @@ export default function MapPlannerPage() {
   const [optimizationResult, setOptimizationResult] = useState<QPSOOptimizationResult | null>(null);
   const [selectedCandidate, setSelectedCandidate] = useState<RouteCandidateAlternative | null>(null);
 
+  // Real-Time Emergency Vehicle Approaching Radar state (for regular users)
+  const [activeAmbulance, setActiveAmbulance] = useState<ActiveAmbulanceAlertData | null>(null);
+  const [isRadarActive, setIsRadarActive] = useState<boolean>(true);
+  const [isSimulatedActive, setIsSimulatedActive] = useState<boolean>(false);
+  const [isAutoSteppingAmbulance, setIsAutoSteppingAmbulance] = useState<boolean>(false);
+  const [ambulanceStepLoading, setAmbulanceStepLoading] = useState<boolean>(false);
+  const [giveWayAcknowledged, setGiveWayAcknowledged] = useState<boolean>(false);
+
   // Search autocomplete state for Origin
   const [originQuery, setOriginQuery] = useState(INITIAL_CITY.center.name || 'Jaistambh Chowk, Raipur');
   const [originSuggestions, setOriginSuggestions] = useState<LocationSearchResult[]>([]);
@@ -122,6 +141,80 @@ export default function MapPlannerPage() {
   useEffect(() => {
     if (destination.name) setDestQuery(destination.name);
   }, [destination.name]);
+
+  // Real-Time Radar Polling: Listen for active emergency vehicles approaching citizen/origin location
+  useEffect(() => {
+    if (!isRadarActive) {
+      setActiveAmbulance(null);
+      setIsSimulatedActive(false);
+      setIsAutoSteppingAmbulance(false);
+      return;
+    }
+    let isMounted = true;
+    const pollAmbulanceAlert = async () => {
+      try {
+        const alert = await fetchActiveAmbulanceAlert(origin.lat, origin.lng, 1800, isSimulatedActive);
+        if (isMounted) {
+          setActiveAmbulance(alert);
+        }
+      } catch (e) {
+        console.error('Failed to poll emergency vehicle alert on map:', e);
+      }
+    };
+
+    pollAmbulanceAlert();
+    const interval = setInterval(pollAmbulanceAlert, 2500);
+    return () => {
+      isMounted = false;
+      clearInterval(interval);
+    };
+  }, [origin.lat, origin.lng, isRadarActive, isSimulatedActive]);
+
+  // Auto-advance ambulance along corridor when continuous simulation mode is enabled
+  useEffect(() => {
+    if (!isAutoSteppingAmbulance || !isRadarActive) return;
+
+    const autoTimer = setInterval(async () => {
+      try {
+        const vehId = activeAmbulance?.vehicle_id || (Math.abs(origin.lng - 81.63) < 1.5 ? 'ev-raipur-1' : 'ev-1');
+        await stepEmergencyVehicle(vehId);
+        const updated = await fetchActiveAmbulanceAlert(origin.lat, origin.lng, 1800, true);
+        setActiveAmbulance(updated);
+      } catch (e) {
+        console.error('Auto step simulation error:', e);
+      }
+    }, 2200);
+
+    return () => clearInterval(autoTimer);
+  }, [isAutoSteppingAmbulance, isRadarActive, origin.lat, origin.lng, activeAmbulance?.vehicle_id]);
+
+  // Step emergency vehicle manually along corridor
+  const handleStepAmbulance = async () => {
+    setAmbulanceStepLoading(true);
+    try {
+      const vehId = activeAmbulance?.vehicle_id || (Math.abs(origin.lng - 81.63) < 1.5 ? 'ev-raipur-1' : 'ev-1');
+      await stepEmergencyVehicle(vehId);
+      const updated = await fetchActiveAmbulanceAlert(origin.lat, origin.lng, 1800, true);
+      setActiveAmbulance(updated);
+    } catch (e) {
+      console.error('Ambulance step error:', e);
+    } finally {
+      setAmbulanceStepLoading(false);
+    }
+  };
+
+  // Immediate simulation seed / trigger
+  const handleTriggerAmbulanceDemo = async () => {
+    setIsRadarActive(true);
+    setIsSimulatedActive(true);
+    setGiveWayAcknowledged(false);
+    try {
+      const updated = await fetchActiveAmbulanceAlert(origin.lat, origin.lng, 1800, true);
+      setActiveAmbulance(updated);
+    } catch (e) {
+      console.error('Simulation trigger error:', e);
+    }
+  };
 
   // Try auto-detecting user location on initial mount once
   useEffect(() => {
@@ -202,6 +295,11 @@ export default function MapPlannerPage() {
       } else {
         setSelectedCityId('custom');
       }
+
+      // Reset any active simulation state on new location
+      setIsSimulatedActive(false);
+      setIsAutoSteppingAmbulance(false);
+      setActiveAmbulance(null);
     } catch (e) {
       console.warn('Could not reverse geocode position:', e);
     } finally {
@@ -246,6 +344,9 @@ export default function MapPlannerPage() {
     setPresets(city.presets);
     setShowOriginDropdown(false);
     setShowDestDropdown(false);
+    setIsSimulatedActive(false);
+    setIsAutoSteppingAmbulance(false);
+    setActiveAmbulance(null);
   }
 
   /**
@@ -602,6 +703,253 @@ export default function MapPlannerPage() {
             </div>
           </div>
 
+          {/* Card: Emergency Vehicles Approaching (Live Citizen Radar) */}
+          <div className={`rounded-2xl p-5 shadow-sm border transition-all duration-300 ${
+            activeAmbulance && activeAmbulance.has_active_ambulance && isRadarActive
+              ? activeAmbulance.is_relevant_to_user
+                ? 'bg-gradient-to-br from-red-50/90 via-white to-rose-50/40 border-red-300 shadow-red-500/10'
+                : 'bg-gradient-to-br from-amber-50/80 via-white to-orange-50/30 border-amber-300 shadow-amber-500/10'
+              : 'bg-white border-slate-200/80'
+          }`}>
+            <div className="flex items-center justify-between mb-3.5">
+              <div className="flex items-center space-x-2.5">
+                <div className={`p-2 rounded-xl transition-all ${
+                  activeAmbulance && activeAmbulance.has_active_ambulance && isRadarActive
+                    ? 'bg-red-600 text-white shadow-md shadow-red-500/30 animate-pulse'
+                    : 'bg-slate-100 text-slate-700'
+                }`}>
+                  <Siren className="w-4 h-4" />
+                </div>
+                <div>
+                  <div className="flex items-center space-x-2">
+                    <h3 className="text-xs font-bold uppercase tracking-wider text-slate-800">
+                      Emergency Vehicles Approaching
+                    </h3>
+                    <span className="flex h-2 w-2 relative">
+                      {isRadarActive && (
+                        <>
+                          <span className={`animate-ping absolute inline-flex h-full w-full rounded-full opacity-75 ${
+                            activeAmbulance?.has_active_ambulance ? 'bg-red-400' : 'bg-emerald-400'
+                          }`} />
+                          <span className={`relative inline-flex rounded-full h-2 w-2 ${
+                            activeAmbulance?.has_active_ambulance ? 'bg-red-500' : 'bg-emerald-500'
+                          }`} />
+                        </>
+                      )}
+                    </span>
+                  </div>
+                  <p className="text-[11px] text-slate-500">Live Citizen Radar & Corridor Give-Way Alert</p>
+                </div>
+              </div>
+
+              {/* Radar Status Badge & Toggle */}
+              <div className="flex items-center space-x-2">
+                <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full uppercase tracking-wider border ${
+                  !isRadarActive
+                    ? 'bg-slate-100 text-slate-500 border-slate-200'
+                    : activeAmbulance?.has_active_ambulance && activeAmbulance.is_relevant_to_user
+                    ? 'bg-red-100 text-red-700 border-red-300 animate-pulse'
+                    : activeAmbulance?.has_active_ambulance
+                    ? 'bg-amber-100 text-amber-800 border-amber-300'
+                    : 'bg-emerald-100 text-emerald-800 border-emerald-300'
+                }`}>
+                  {!isRadarActive
+                    ? 'RADAR OFF'
+                    : activeAmbulance?.has_active_ambulance && activeAmbulance.is_relevant_to_user
+                    ? '🚨 NEARBY (<1.8km)'
+                    : activeAmbulance?.has_active_ambulance
+                    ? '⚠️ ON CORRIDOR'
+                    : '🛡️ ALL CLEAR'}
+                </span>
+                <button
+                  type="button"
+                  onClick={() => setIsRadarActive(!isRadarActive)}
+                  className={`text-[11px] font-semibold px-2 py-0.5 rounded-lg border transition-all ${
+                    isRadarActive
+                      ? 'bg-slate-900 text-white border-slate-800 hover:bg-slate-800'
+                      : 'bg-slate-100 text-slate-600 border-slate-200 hover:bg-slate-200'
+                  }`}
+                  title={isRadarActive ? 'Disable Radar Scanning' : 'Enable Radar Scanning'}
+                >
+                  {isRadarActive ? 'Enabled' : 'Paused'}
+                </button>
+              </div>
+            </div>
+
+            {/* Content: Active Ambulance Approaching */}
+            {isRadarActive && activeAmbulance && activeAmbulance.has_active_ambulance ? (
+              <div className="space-y-3">
+                {/* Vehicle Identity & Real-time Tag */}
+                <div className="flex items-center justify-between p-2.5 rounded-xl bg-white border border-red-200 shadow-sm">
+                  <div className="flex items-center space-x-2.5">
+                    <div className="w-8 h-8 rounded-lg bg-red-600 text-white flex items-center justify-center font-black text-sm shadow">
+                      🚑
+                    </div>
+                    <div>
+                      <div className="flex items-center space-x-2">
+                        <span className="text-xs font-black text-red-700 tracking-tight">
+                          {activeAmbulance.vehicle_code || 'AMB-108'}
+                        </span>
+                        <span className="text-[10px] font-bold px-1.5 py-0.2 rounded bg-red-100 text-red-800 uppercase">
+                          Priority 1 Mission
+                        </span>
+                      </div>
+                      <p className="text-[11px] text-slate-500 font-medium">
+                        {activeAmbulance.ambulance_location?.name || 'En route via Priority Clearway'}
+                      </p>
+                    </div>
+                  </div>
+                  <div className="text-right">
+                    <div className="text-xs font-black text-slate-800">
+                      {activeAmbulance.distance_meters} m
+                    </div>
+                    <div className="text-[10px] font-bold text-red-600">
+                      ETA: ~{activeAmbulance.eta_seconds}s
+                    </div>
+                  </div>
+                </div>
+
+                {/* 4-Item Live Telemetry Grid */}
+                <div className="grid grid-cols-4 gap-2">
+                  <div className="bg-white/90 border border-slate-200 rounded-xl p-2 text-center shadow-2xs">
+                    <div className="text-[10px] uppercase font-bold text-slate-400">Distance</div>
+                    <div className={`text-xs font-black mt-0.5 ${
+                      activeAmbulance.distance_meters < 500 ? 'text-red-600' : 'text-slate-800'
+                    }`}>
+                      {activeAmbulance.distance_meters} m
+                    </div>
+                    <div className="text-[9px] text-slate-400 font-medium truncate">To route</div>
+                  </div>
+
+                  <div className="bg-white/90 border border-slate-200 rounded-xl p-2 text-center shadow-2xs">
+                    <div className="text-[10px] uppercase font-bold text-slate-400">Est. Arrival</div>
+                    <div className="text-xs font-black text-emerald-600 mt-0.5">
+                      {activeAmbulance.eta_seconds} sec
+                    </div>
+                    <div className="text-[9px] text-slate-400 font-medium truncate">Intercept ETA</div>
+                  </div>
+
+                  <div className="bg-white/90 border border-slate-200 rounded-xl p-2 text-center shadow-2xs">
+                    <div className="text-[10px] uppercase font-bold text-slate-400">Bearing</div>
+                    <div className="flex items-center justify-center space-x-1 mt-0.5 text-xs font-black text-amber-600">
+                      <span
+                        className="inline-block transition-transform duration-300 font-black text-amber-500"
+                        style={{ transform: `rotate(${activeAmbulance.heading_degrees || 0}deg)` }}
+                      >
+                        ↑
+                      </span>
+                      <span className="truncate">{activeAmbulance.heading_degrees}°</span>
+                    </div>
+                    <div className="text-[9px] text-slate-400 font-medium truncate">
+                      {activeAmbulance.heading_direction || 'North'}
+                    </div>
+                  </div>
+
+                  <div className="bg-white/90 border border-slate-200 rounded-xl p-2 text-center shadow-2xs">
+                    <div className="text-[10px] uppercase font-bold text-slate-400">Live Speed</div>
+                    <div className="text-xs font-black text-blue-600 mt-0.5">
+                      {activeAmbulance.speed_kmh}
+                    </div>
+                    <div className="text-[9px] text-slate-400 font-medium truncate">km/h</div>
+                  </div>
+                </div>
+
+                {/* Commuter Give-Way Action Alert Box */}
+                <div className="p-3 rounded-xl bg-red-600 text-white shadow-sm flex items-start space-x-2.5">
+                  <AlertTriangle className="w-4 h-4 text-yellow-300 shrink-0 mt-0.5 animate-bounce" />
+                  <div className="text-xs">
+                    <div className="font-bold text-yellow-200 uppercase tracking-wide text-[11px]">
+                      Citizen Give-Way Advisory
+                    </div>
+                    <p className="mt-0.5 leading-snug font-medium text-white/95">
+                      {activeAmbulance.give_way_action ||
+                        'Move left safely and yield the right-of-way. Maintain clearway until ambulance passes.'}
+                    </p>
+                  </div>
+                </div>
+
+                {/* Interactive Simulation Controls */}
+                <div className="pt-1 flex items-center justify-between gap-2">
+                  <div className="flex items-center space-x-1.5">
+                    <button
+                      type="button"
+                      onClick={handleStepAmbulance}
+                      disabled={ambulanceStepLoading}
+                      className="px-2.5 py-1.5 bg-slate-900 hover:bg-slate-800 disabled:opacity-50 text-white rounded-lg text-xs font-bold flex items-center space-x-1 transition-all shadow-xs"
+                      title="Advance emergency vehicle by one coordinate step"
+                    >
+                      {ambulanceStepLoading ? (
+                        <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                      ) : (
+                        <FastForward className="w-3.5 h-3.5 text-yellow-400" />
+                      )}
+                      <span>Step ⏩</span>
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => setIsAutoSteppingAmbulance(!isAutoSteppingAmbulance)}
+                      className={`px-2.5 py-1.5 rounded-lg text-xs font-bold flex items-center space-x-1 transition-all border ${
+                        isAutoSteppingAmbulance
+                          ? 'bg-amber-500 text-slate-950 border-amber-600 font-black shadow-xs animate-pulse'
+                          : 'bg-slate-100 hover:bg-slate-200 text-slate-700 border-slate-300'
+                      }`}
+                      title={isAutoSteppingAmbulance ? 'Pause continuous movement' : 'Start auto-moving vehicle'}
+                    >
+                      {isAutoSteppingAmbulance ? (
+                        <>
+                          <Pause className="w-3.5 h-3.5" />
+                          <span>Moving (Auto)</span>
+                        </>
+                      ) : (
+                        <>
+                          <Play className="w-3.5 h-3.5 text-blue-600" />
+                          <span>Auto Play</span>
+                        </>
+                      )}
+                    </button>
+                  </div>
+
+                  <button
+                    type="button"
+                    onClick={() => navigate('/emergency')}
+                    className="text-[11px] font-bold text-blue-600 hover:text-blue-800 hover:underline flex items-center space-x-1"
+                  >
+                    <span>Dispatcher View ↗</span>
+                  </button>
+                </div>
+              </div>
+            ) : (
+              /* Content: Standby / Clear State */
+              <div className="space-y-3">
+                <div className="flex items-center space-x-3 p-3 rounded-xl bg-emerald-50/70 border border-emerald-200/80">
+                  <div className="p-2 rounded-lg bg-emerald-600 text-white shrink-0">
+                    <ShieldCheck className="w-4 h-4" />
+                  </div>
+                  <div>
+                    <h4 className="text-xs font-bold text-emerald-950">All Corridors Clear</h4>
+                    <p className="text-[11px] text-emerald-800/90 leading-tight mt-0.5">
+                      No emergency vehicles within 1,800m of your route. MargSetu Citizen Radar is continuously listening for siren dispatches.
+                    </p>
+                  </div>
+                </div>
+
+                {/* Simulation Trigger Button */}
+                <div className="flex items-center justify-between pt-1">
+                  <span className="text-[11px] text-slate-400 font-medium">Test & Demo</span>
+                  <button
+                    type="button"
+                    onClick={handleTriggerAmbulanceDemo}
+                    className="px-3 py-1.5 bg-red-50 hover:bg-red-100 text-red-700 border border-red-200 rounded-xl text-xs font-bold flex items-center space-x-1.5 transition-all shadow-2xs hover:shadow-xs active:scale-98"
+                  >
+                    <Siren className="w-3.5 h-3.5 text-red-600 animate-pulse" />
+                    <span>Simulate Approaching Ambulance</span>
+                  </button>
+                </div>
+              </div>
+            )}
+          </div>
+
           {/* Card: Vehicle Profile Selector */}
           <div className="bg-white rounded-2xl p-5 shadow-sm border border-slate-200/80">
             <h3 className="text-xs font-bold uppercase tracking-wider text-slate-500 mb-3 flex items-center justify-between">
@@ -831,6 +1179,78 @@ export default function MapPlannerPage() {
 
         {/* Right Side: Interactive Leaflet Map (Sticky in Viewport) */}
         <section className="lg:col-span-7 lg:sticky lg:top-24 lg:h-[calc(100vh-7.5rem)] flex flex-col self-start space-y-3 z-0">
+
+          {/* Ambient Emergency Approaching Give-Way Alert Banner (Citizen Map View) */}
+          {isRadarActive && activeAmbulance && activeAmbulance.has_active_ambulance && activeAmbulance.is_relevant_to_user && !giveWayAcknowledged && (
+            <div className="bg-gradient-to-r from-red-600 via-rose-600 to-red-700 text-white p-3.5 rounded-2xl shadow-xl border-2 border-red-400 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 animate-pulse shrink-0">
+              <div className="flex items-center space-x-3">
+                <div className="p-2.5 bg-white/20 rounded-xl shrink-0">
+                  <Siren className="w-5 h-5 text-yellow-300 animate-bounce" />
+                </div>
+                <div>
+                  <div className="flex items-center space-x-2">
+                    <span className="font-extrabold text-xs sm:text-sm tracking-wide uppercase">
+                      🚨 EMERGENCY VEHICLE APPROACHING YOUR ROUTE ({activeAmbulance.vehicle_code || 'AMB-108'})
+                    </span>
+                    <span className="bg-yellow-400 text-red-950 text-[10px] font-black px-2 py-0.5 rounded-full uppercase">
+                      GIVE WAY
+                    </span>
+                  </div>
+                  <p className="text-xs text-red-100 mt-0.5">
+                    {activeAmbulance.give_way_action || 'Move to the left shoulder and clear the emergency corridor immediately.'}
+                  </p>
+                  <div className="flex flex-wrap items-center gap-2 mt-1.5 text-[11px] font-bold">
+                    <span className="bg-red-950/70 border border-red-400/40 px-2 py-0.5 rounded text-white">
+                      📏 {activeAmbulance.distance_meters}m away
+                    </span>
+                    <span className="bg-red-950/70 border border-red-400/40 px-2 py-0.5 rounded text-white">
+                      ⏱️ ETA: {activeAmbulance.eta_seconds}s
+                    </span>
+                    <span className="bg-red-950/70 border border-red-400/40 px-2 py-0.5 rounded text-white flex items-center gap-1">
+                      <span>🧭 Heading: {activeAmbulance.heading_direction} ({activeAmbulance.heading_degrees}°)</span>
+                      <span
+                        className="inline-block transition-transform duration-300 text-yellow-300 font-bold"
+                        style={{ transform: `rotate(${activeAmbulance.heading_degrees || 0}deg)` }}
+                      >
+                        ↑
+                      </span>
+                    </span>
+                    <span className="bg-red-950/70 border border-red-400/40 px-2 py-0.5 rounded text-white">
+                      ⚡ {activeAmbulance.speed_kmh} km/h
+                    </span>
+                  </div>
+                </div>
+              </div>
+              <div className="flex items-center space-x-2 w-full sm:w-auto shrink-0">
+                <button
+                  type="button"
+                  onClick={() => setGiveWayAcknowledged(true)}
+                  className="flex-1 sm:flex-initial bg-white hover:bg-red-50 text-red-700 font-extrabold px-3 py-1.5 rounded-xl text-xs shadow-md transition-all active:scale-95 whitespace-nowrap"
+                >
+                  Acknowledge & Yield
+                </button>
+              </div>
+            </div>
+          )}
+
+          {isRadarActive && activeAmbulance && activeAmbulance.has_active_ambulance && activeAmbulance.is_relevant_to_user && giveWayAcknowledged && (
+            <div className="bg-red-950/90 border border-red-600/60 text-red-200 text-xs px-3.5 py-2 rounded-xl flex items-center justify-between shadow-md shrink-0">
+              <div className="flex items-center space-x-2">
+                <Siren className="w-4 h-4 text-red-400 animate-pulse shrink-0" />
+                <span>
+                  Clearway active for <b>{activeAmbulance.vehicle_code}</b> • <b>{activeAmbulance.distance_meters}m away</b> (ETA: <b>{activeAmbulance.eta_seconds}s</b> • Heading: <b>{activeAmbulance.heading_direction}</b>)
+                </span>
+              </div>
+              <button
+                type="button"
+                onClick={() => setGiveWayAcknowledged(false)}
+                className="text-[11px] font-bold text-red-300 hover:text-white underline ml-3 shrink-0"
+              >
+                Reopen Alert
+              </button>
+            </div>
+          )}
+
           <div className="bg-white rounded-2xl p-4 shadow-sm border border-slate-200 flex-1 flex flex-col h-full overflow-hidden">
             <div className="flex items-center justify-between mb-2 shrink-0">
               <div className="flex items-center space-x-2">
@@ -864,6 +1284,7 @@ export default function MapPlannerPage() {
                 alternativeRoutes={alternativePolylines}
                 vehicleLocation={origin}
                 vehicleType={vehicleType}
+                activeAmbulanceAlert={isRadarActive && activeAmbulance?.has_active_ambulance && activeAmbulance?.is_relevant_to_user ? activeAmbulance : null}
                 showEmergencyRadius={isEmergency}
                 alertRadiusMeters={600}
                 onMapClick={handleMapClick}
@@ -899,6 +1320,17 @@ export default function MapPlannerPage() {
                 <span className="w-3.5 h-1 bg-purple-500 rounded-sm" />
                 <span>Corridor C (Perimeter Bypass)</span>
               </div>
+              {isRadarActive && activeAmbulance && activeAmbulance.has_active_ambulance && (
+                <>
+                  <div className="flex items-center space-x-1.5 text-red-600 font-semibold">
+                    <span className="w-3.5 h-1.5 bg-red-600 rounded-full animate-pulse" />
+                    <span>Ambulance Clearway ({activeAmbulance.vehicle_code || 'AMB-108'})</span>
+                  </div>
+                  <div className="flex items-center space-x-1.5 text-red-700 font-semibold">
+                    <span>🚑 Approaching ({activeAmbulance.speed_kmh} km/h • {activeAmbulance.heading_direction})</span>
+                  </div>
+                </>
+              )}
               {isEmergency && (
                 <div className="flex items-center space-x-1.5 text-red-600 font-semibold">
                   <span className="w-2.5 h-2.5 rounded-full border border-red-500 bg-red-100 animate-pulse" />

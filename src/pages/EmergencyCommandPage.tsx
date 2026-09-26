@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import NavigationNavbar from '@/components/NavigationNavbar';
 import LeafletMap from '@/components/LeafletMap';
 import { checkCitizenGiveWayAlerts, fetchActiveAmbulanceAlert, stepEmergencyVehicle } from '@/services/apiService';
+import { BHUBANESWAR_AMBULANCE_REAL_ROAD } from '@/data/realRoadCorridors';
 import type { CitizenGiveWayAlertItem, ActiveAmbulanceAlertData } from '@/types';
 import {
   Siren,
@@ -33,14 +34,8 @@ export default function EmergencyCommandPage() {
   const [activeAmbulance, setActiveAmbulance] = useState<ActiveAmbulanceAlertData | null>(null);
   const [isAutoStepping, setIsAutoStepping] = useState(true);
 
-  // Active emergency vehicle trajectory
-  const emergencyRoute: [number, number][] = [
-    [20.2720, 85.8280],
-    [20.2810, 85.8250],
-    [20.2950, 85.8210],
-    [20.3050, 85.8190],
-    [20.3120, 85.8180]
-  ];
+  // Active emergency vehicle trajectory strictly on real roads
+  const emergencyRoute: [number, number][] = BHUBANESWAR_AMBULANCE_REAL_ROAD;
 
   const simulatedCitizens = [
     { id: 'c1', lat: 20.2740, lng: 85.8300, label: 'Citizen Priya (In corridor - 320m away)' },

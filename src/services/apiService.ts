@@ -13,8 +13,14 @@ import type {
   OptimizationWeights,
   IncidentRecord,
   CitizenGiveWayAlertItem,
-  ActiveAmbulanceAlertData
+  ActiveAmbulanceAlertData,
+  SpeedObservationPayload,
+  RoadSegmentIntelligence,
+  TrafficPredictionItem,
+  RoadConditionReportItem,
+  TrafficAnalyticsSummaryData
 } from '@/types';
+import { getRealRoadCorridor } from '@/data/realRoadCorridors';
 
 const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000';
 
@@ -107,6 +113,169 @@ export async function updateTrafficStatus(edgeId: string, level: string, isBlock
   return { status: 'success', edge_id: edgeId, traffic_level: level };
 }
 
+// ----------------------------------------------------
+// AI-Powered Traffic Intelligence & Analytics APIs
+// ----------------------------------------------------
+
+export async function submitSpeedObservation(obs: SpeedObservationPayload): Promise<any> {
+  try {
+    const res = await fetch(`${API_BASE_URL}/api/traffic/speed`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(obs)
+    });
+    if (res.ok) return await res.json();
+  } catch (err) {
+    console.warn('Failed to submit telemetry speed ping:', err);
+  }
+  return { status: 'mock_recorded', segment_id: obs.segment_id || 'E1' };
+}
+
+export async function fetchSegmentIntelligence(segmentId: string): Promise<RoadSegmentIntelligence> {
+  try {
+    const res = await fetch(`${API_BASE_URL}/api/traffic/segment/${segmentId}`);
+    if (res.ok) return await res.json();
+  } catch (err) {
+    console.warn('Failed to fetch segment intelligence:', err);
+  }
+  return {
+    segment_id: segmentId,
+    road_name: 'Janpath Arterial',
+    reference_speed_kmh: 45.0,
+    current_average_speed_kmh: 18.0,
+    historical_average_speed_kmh: 36.0,
+    active_observations: 15,
+    traffic_level: 'Heavy',
+    congestion_score: 68.0,
+    confidence_score: 92.0,
+    estimated_travel_time_min: 4.2,
+    last_updated: new Date().toISOString(),
+    coordinates: [[20.2685, 85.8360], [20.2610, 85.8340]],
+    distance_km: 1.2,
+    is_blocked: false
+  };
+}
+
+export async function fetchNearbyTraffic(lat: number, lng: number, radiusKm: number = 5.0): Promise<RoadSegmentIntelligence[]> {
+  try {
+    const res = await fetch(`${API_BASE_URL}/api/traffic/nearby?lat=${lat}&lng=${lng}&radius_km=${radiusKm}`);
+    if (res.ok) return await res.json();
+  } catch (err) {
+    console.warn('Failed to fetch nearby traffic:', err);
+  }
+  return [];
+}
+
+export async function fetchTrafficAnalytics(): Promise<TrafficAnalyticsSummaryData> {
+  try {
+    const res = await fetch(`${API_BASE_URL}/api/traffic/analytics`);
+    if (res.ok) return await res.json();
+  } catch (err) {
+    console.warn('Failed to fetch traffic analytics:', err);
+  }
+  return {
+    network_average_speed_kmh: 38.4,
+    congested_segments_count: 3,
+    total_segments_count: 22,
+    active_observers_count: 48,
+    top_bottlenecks: [
+      {
+        segment_id: 'E6',
+        name: 'Janpath North',
+        congestion_score: 82.5,
+        current_speed_kmh: 12.0,
+        reference_speed_kmh: 45.0,
+        traffic_level: 'Heavy',
+        observations: 11,
+        confidence_score: 91.0
+      },
+      {
+        segment_id: 'E22',
+        name: 'Rasulgarh Overbridge',
+        congestion_score: 85.0,
+        current_speed_kmh: 9.8,
+        reference_speed_kmh: 50.0,
+        traffic_level: 'Severe',
+        observations: 10,
+        confidence_score: 89.0
+      },
+      {
+        segment_id: 'E1',
+        name: 'Janpath South',
+        congestion_score: 65.0,
+        current_speed_kmh: 18.2,
+        reference_speed_kmh: 45.0,
+        traffic_level: 'Heavy',
+        observations: 15,
+        confidence_score: 95.0
+      }
+    ],
+    congestion_distribution: { Normal: 14, Moderate: 5, Heavy: 2, Severe: 1 },
+    system_status: 'OPTIMAL_FLOW',
+    timestamp: new Date().toISOString()
+  };
+}
+
+export async function fetchTrafficPredictions(segmentId?: string, horizonMinutes: number = 15): Promise<TrafficPredictionItem[]> {
+  try {
+    const url = `${API_BASE_URL}/api/traffic/prediction?horizon_minutes=${horizonMinutes}${segmentId ? `&segment_id=${segmentId}` : ''}`;
+    const res = await fetch(url);
+    if (res.ok) {
+      const data = await res.json();
+      return data.predictions || [];
+    }
+  } catch (err) {
+    console.warn('Failed to fetch traffic predictions:', err);
+  }
+  return [
+    {
+      segment_id: segmentId || 'E1',
+      horizon_minutes: horizonMinutes,
+      predicted_speed_kmh: 22.0,
+      predicted_traffic_level: 'Moderate',
+      predicted_congestion_score: 48.0,
+      confidence_score: 79.0,
+      trend: 'IMPROVING',
+      timestamp: new Date().toISOString()
+    }
+  ];
+}
+
+export async function submitRoadConditionReport(report: Partial<RoadConditionReportItem>): Promise<RoadConditionReportItem> {
+  try {
+    const res = await fetch(`${API_BASE_URL}/api/traffic/report`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(report)
+    });
+    if (res.ok) return await res.json();
+  } catch (err) {
+    console.warn('Failed to submit road condition report:', err);
+  }
+  return {
+    id: `rep-${Date.now()}`,
+    latitude: report.latitude || 20.2685,
+    longitude: report.longitude || 85.8360,
+    report_type: report.report_type || 'pothole',
+    severity: report.severity || 'medium',
+    description: report.description,
+    timestamp: new Date().toISOString(),
+    upvotes: 1,
+    status: 'active'
+  };
+}
+
+export async function fetchRoadConditionReports(): Promise<RoadConditionReportItem[]> {
+  try {
+    const res = await fetch(`${API_BASE_URL}/api/traffic/reports`);
+    if (res.ok) return await res.json();
+  } catch (err) {
+    console.warn('Failed to fetch road condition reports:', err);
+  }
+  return [];
+}
+
+
 export async function checkCitizenGiveWayAlerts(vehicleId: string, radiusMeters: number = 600): Promise<CitizenGiveWayAlertItem[]> {
   try {
     const res = await fetch(`${API_BASE_URL}/api/emergency/give-way`, {
@@ -138,11 +307,12 @@ export async function checkCitizenGiveWayAlerts(vehicleId: string, radiusMeters:
 export async function fetchActiveAmbulanceAlert(
   userLat: number = 20.2740,
   userLng: number = 85.8300,
-  radiusMeters: number = 1200
+  radiusMeters: number = 1200,
+  simulate: boolean = false
 ): Promise<ActiveAmbulanceAlertData> {
   try {
     const res = await fetch(
-      `${API_BASE_URL}/api/emergency/active-ambulance?user_lat=${userLat}&user_lng=${userLng}&alert_radius_meters=${radiusMeters}`
+      `${API_BASE_URL}/api/emergency/active-ambulance?user_lat=${userLat}&user_lng=${userLng}&alert_radius_meters=${radiusMeters}&simulate=${simulate}`
     );
     if (res.ok) {
       const data = await res.json();
@@ -152,29 +322,21 @@ export async function fetchActiveAmbulanceAlert(
     // fallback to simulated corridor if backend unreachable
   }
 
-  // Client-side simulation fallback: location-aware corridor
-  // Detect if user is in Raipur (~21.25) or Bhubaneswar (~20.28)
-  const isRaipur = Math.abs(userLat - 21.25) < 1.0;
+  // Strictly do NOT synthesize or show any ambulance when simulation is not requested
+  if (!simulate) {
+    return {
+      has_active_ambulance: false,
+      is_relevant_to_user: false,
+      message: 'No active emergency vehicle in proximity.'
+    };
+  }
 
-  const corridorCoords: [number, number][] = isRaipur
-    ? [
-        [21.2420, 81.6320],
-        [21.2480, 81.6305],
-        [21.2530, 81.6298],
-        [21.2580, 81.6290],
-        [21.2640, 81.6280]
-      ]
-    : [
-        [20.2720, 85.8280],
-        [20.2810, 85.8250],
-        [20.2950, 85.8210],
-        [20.3050, 85.8190],
-        [20.3120, 85.8180]
-      ];
+  // Client-side simulation fallback: location-aware real road corridor strictly on streets (only when simulate === true)
+  const corridorCoords: [number, number][] = getRealRoadCorridor(userLat, userLng);
 
-  // Smoothly move ambulance step based on time
+  // Smoothly move ambulance step based on time along real road
   const stepCount = corridorCoords.length;
-  const cycleIndex = Math.floor((Date.now() / 4000) % stepCount);
+  const cycleIndex = Math.floor((Date.now() / 2500) % stepCount);
   const nextIndex = Math.min(stepCount - 1, cycleIndex + 1);
 
   const ambPos = corridorCoords[cycleIndex];
