@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import NavigationNavbar from '@/components/NavigationNavbar';
 import HighwayCorridorBanner from '@/components/HighwayCorridorBanner';
@@ -57,7 +57,13 @@ import {
   Activity,
   Volume2,
   CheckCircle2,
-  ShieldAlert
+  ShieldAlert,
+  Menu,
+  X,
+  ChevronUp,
+  ChevronDown,
+  Layers,
+  ArrowRight
 } from 'lucide-react';
 
 const VEHICLES: { type: GeneralVehicleType; label: string; icon: any; isEmergency?: boolean }[] = [
@@ -85,8 +91,145 @@ const PREFERENCES: { key: RoutePreference; label: string; desc: string }[] = [
 // Initial default aligned with Raipur (detected user region)
 const INITIAL_CITY = CITY_PROFILES[0]; // Raipur
 
+function useIsMobile() {
+  const [isMobile, setIsMobile] = useState<boolean>(() => {
+    if (typeof window === 'undefined') return false;
+    const isSmall = window.innerWidth < 1024;
+    const isMobileDevice = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
+    return isSmall || isMobileDevice;
+  });
+
+  useEffect(() => {
+    const check = () => {
+      const isSmall = window.innerWidth < 1024;
+      const isMobileDevice = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
+      setIsMobile(isSmall || (isMobileDevice && window.innerWidth < 1200));
+    };
+
+    window.addEventListener('resize', check);
+    return () => window.removeEventListener('resize', check);
+  }, []);
+
+  return isMobile;
+}
+
 export default function MapPlannerPage() {
   const navigate = useNavigate();
+
+  // Responsive layout check: Mobile (Android & iOS) vs Laptop
+  const isMobile = useIsMobile();
+
+  // Mobile Lyft UI Drawer & Sheet States
+  const [isMobileSearchOpen, setIsMobileSearchOpen] = useState(false);
+  const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
+  const [mobileTrafficEnabled, setMobileTrafficEnabled] = useState(true);
+
+  // Mobile Draggable Bottom Sheet Gestures & Anchors
+  const PEEK_HEIGHT = 92;
+  const [sheetHeight, setSheetHeight] = useState<number>(PEEK_HEIGHT);
+  const [isDraggingSheet, setIsDraggingSheet] = useState<boolean>(false);
+  const dragStartYRef = useRef<number>(0);
+  const dragStartHeightRef = useRef<number>(PEEK_HEIGHT);
+  const dragStartTimeRef = useRef<number>(0);
+  const dragDistanceRef = useRef<number>(0);
+  const isDraggingRef = useRef<boolean>(false);
+
+  const getMidHeight = useCallback(() => {
+    return Math.min(440, Math.max(360, Math.round(window.innerHeight * 0.52)));
+  }, []);
+
+  const getFullHeight = useCallback(() => {
+    return Math.min(760, Math.max(540, Math.round(window.innerHeight * 0.84)));
+  }, []);
+
+  const handleDragStart = useCallback((clientY: number) => {
+    isDraggingRef.current = true;
+    setIsDraggingSheet(true);
+    dragStartYRef.current = clientY;
+    dragStartHeightRef.current = sheetHeight;
+    dragStartTimeRef.current = Date.now();
+    dragDistanceRef.current = 0;
+  }, [sheetHeight]);
+
+  const handleDragMove = useCallback((clientY: number) => {
+    if (!isDraggingRef.current) return;
+    const deltaY = dragStartYRef.current - clientY;
+    dragDistanceRef.current = Math.max(dragDistanceRef.current, Math.abs(deltaY));
+    const fullH = getFullHeight();
+    const minH = PEEK_HEIGHT;
+    const maxH = fullH + 25;
+    const nextH = Math.max(minH, Math.min(maxH, dragStartHeightRef.current + deltaY));
+    setSheetHeight(nextH);
+  }, [getFullHeight]);
+
+  const handleDragEnd = useCallback((clientY: number) => {
+    if (!isDraggingRef.current) return;
+    isDraggingRef.current = false;
+    setIsDraggingSheet(false);
+
+    const deltaY = dragStartYRef.current - clientY;
+    const deltaTime = Math.max(1, Date.now() - dragStartTimeRef.current);
+    const velocity = deltaY / deltaTime; // px/ms
+
+    const midH = getMidHeight();
+    const fullH = getFullHeight();
+    const snapPoints = [PEEK_HEIGHT, midH, fullH];
+
+    let targetHeight = PEEK_HEIGHT;
+
+    if (velocity > 0.35) {
+      // Swiped UP fast
+      if (dragStartHeightRef.current <= PEEK_HEIGHT + 40) {
+        targetHeight = midH;
+      } else {
+        targetHeight = fullH;
+      }
+    } else if (velocity < -0.35) {
+      // Swiped DOWN fast
+      if (dragStartHeightRef.current >= fullH - 40) {
+        targetHeight = midH;
+      } else {
+        targetHeight = PEEK_HEIGHT;
+      }
+    } else {
+      // Snap to closest anchor
+      targetHeight = snapPoints.reduce((prev, curr) =>
+        Math.abs(curr - sheetHeight) < Math.abs(prev - sheetHeight) ? curr : prev
+      );
+    }
+
+    setSheetHeight(targetHeight);
+  }, [sheetHeight, getMidHeight, getFullHeight]);
+
+  const toggleSheet = useCallback(() => {
+    if (dragDistanceRef.current > 8) return;
+    const midH = getMidHeight();
+    if (sheetHeight <= PEEK_HEIGHT + 20) {
+      setSheetHeight(midH);
+    } else {
+      setSheetHeight(PEEK_HEIGHT);
+    }
+  }, [sheetHeight, getMidHeight]);
+
+  useEffect(() => {
+    const onMouseMove = (e: MouseEvent) => {
+      if (isDraggingRef.current) {
+        handleDragMove(e.clientY);
+      }
+    };
+    const onMouseUp = (e: MouseEvent) => {
+      if (isDraggingRef.current) {
+        handleDragEnd(e.clientY);
+      }
+    };
+
+    window.addEventListener('mousemove', onMouseMove);
+    window.addEventListener('mouseup', onMouseUp);
+    return () => {
+      window.removeEventListener('mousemove', onMouseMove);
+      window.removeEventListener('mouseup', onMouseUp);
+    };
+  }, [handleDragMove, handleDragEnd]);
 
   const [origin, setOrigin] = useState<GeoPoint>(INITIAL_CITY.center);
   const [destination, setDestination] = useState<GeoPoint>(INITIAL_CITY.defaultDestination);
@@ -452,12 +595,659 @@ export default function MapPlannerPage() {
     }
   }
 
-  // Active polyline to render on the map
+  // Active polylines to render on both Mobile and Desktop maps
   const activeRoutePolyline = selectedCandidate?.coordinates || optimizationResult?.route_geometry;
   const alternativePolylines = optimizationResult?.candidate_alternatives
     ?.filter((c) => c.id !== selectedCandidate?.id)
     .map((c) => c.coordinates) || [];
 
+  // =========================================================================
+  // MOBILE VIEW: Lyft iOS Transit Route Map Experience for Android & iOS Users
+  // (Full-screen map, floating search capsule, floating action buttons, transit bottom sheet)
+  // =========================================================================
+  if (isMobile) {
+    return (
+      <div className="h-[100dvh] w-full relative overflow-hidden bg-slate-900 select-none font-sans flex flex-col">
+        {/* 1. Fullscreen Map Layer */}
+        <div className="absolute inset-0 z-0">
+          <LeafletMap
+            origin={origin}
+            destination={destination}
+            primaryRoute={activeRoutePolyline}
+            alternativeRoutes={alternativePolylines}
+            vehicleLocation={origin}
+            vehicleType={vehicleType}
+            activeAmbulanceAlert={
+              isRadarActive && activeAmbulance?.has_active_ambulance && activeAmbulance?.is_relevant_to_user
+                ? activeAmbulance
+                : null
+            }
+            showEmergencyRadius={isEmergency}
+            alertRadiusMeters={600}
+            trafficEnabled={mobileTrafficEnabled}
+            onMapClick={handleMapClick}
+            onSelectAlternative={(altIdx) => {
+              const remaining = optimizationResult?.candidate_alternatives?.filter(
+                (c) => c.id !== selectedCandidate?.id
+              );
+              if (remaining && remaining[altIdx]) {
+                setSelectedCandidate(remaining[altIdx]);
+              }
+            }}
+            className="w-full h-full"
+          />
+        </div>
+
+        {/* 2. Top Floating Navigation & Search Bar (Lyft iOS Style) */}
+        <div className="absolute top-3 left-3 right-3 z-20 flex items-center space-x-2 pt-[max(env(safe-area-inset-top),4px)]">
+          {/* Hamburger Menu Button */}
+          <button
+            type="button"
+            onClick={() => setIsMobileMenuOpen(true)}
+            className="w-11 h-11 bg-white/95 backdrop-blur-md rounded-2xl shadow-lg border border-slate-200/90 flex items-center justify-center text-slate-800 active:scale-95 transition-all shrink-0"
+            title="Open City & Navigation Menu"
+          >
+            <Menu className="w-5 h-5 text-slate-700" />
+          </button>
+
+          {/* Capsule Route Pill / Search Bar */}
+          <button
+            type="button"
+            onClick={() => setIsMobileSearchOpen(true)}
+            className="flex-1 bg-white/95 backdrop-blur-md rounded-2xl px-3.5 py-2.5 shadow-lg border border-slate-200/90 flex items-center justify-between active:scale-[0.99] transition-all text-left"
+          >
+            <div className="flex items-center space-x-2 overflow-hidden mr-2">
+              <div className="flex items-center space-x-1.5 truncate text-xs font-bold text-slate-800">
+                <span className="w-2 h-2 rounded-full bg-emerald-500 shrink-0" />
+                <span className="truncate max-w-[100px] sm:max-w-[140px]">
+                  {origin.name ? origin.name.split(',')[0] : 'Origin'}
+                </span>
+              </div>
+              <ArrowRight className="w-3.5 h-3.5 text-slate-400 shrink-0" />
+              <div className="flex items-center space-x-1.5 truncate text-xs font-bold text-slate-800">
+                <span className="w-2 h-2 rounded-full bg-rose-500 shrink-0" />
+                <span className="truncate max-w-[100px] sm:max-w-[140px]">
+                  {destination.name ? destination.name.split(',')[0] : 'Destination'}
+                </span>
+              </div>
+            </div>
+            <div className="p-1.5 bg-blue-50 text-blue-600 rounded-xl shrink-0">
+              <Search className="w-3.5 h-3.5" />
+            </div>
+          </button>
+        </div>
+
+        {/* 3. Ambient Give-Way Banner (if emergency ambulance is approaching) */}
+        {isRadarActive && activeAmbulance && activeAmbulance.has_active_ambulance && activeAmbulance.is_relevant_to_user && !giveWayAcknowledged && (
+          <div className="absolute top-18 left-3 right-3 z-20 bg-gradient-to-r from-red-600 via-rose-600 to-red-700 text-white p-3 rounded-2xl shadow-xl border border-red-400 animate-pulse flex items-center justify-between text-xs">
+            <div className="flex items-center space-x-2.5 truncate">
+              <Siren className="w-4 h-4 text-yellow-300 shrink-0" />
+              <div className="truncate">
+                <div className="font-extrabold text-[11px] uppercase tracking-wide">
+                  🚨 {activeAmbulance.vehicle_code || 'AMB-108'} Approaching ({activeAmbulance.distance_meters}m)
+                </div>
+                <div className="text-[10px] text-red-100 truncate">
+                  ETA: {activeAmbulance.eta_seconds}s • Yield to left shoulder
+                </div>
+              </div>
+            </div>
+            <button
+              type="button"
+              onClick={() => setGiveWayAcknowledged(true)}
+              className="bg-white text-red-700 text-[10px] font-black px-2.5 py-1 rounded-lg shrink-0 ml-2 shadow-xs"
+            >
+              Yielded
+            </button>
+          </div>
+        )}
+
+        {/* 4. Floating Map Controls (Bottom Right, dynamic height tracking above bottom sheet) */}
+        <div
+          className="absolute right-3 z-20 flex flex-col space-y-2.5"
+          style={{
+            bottom: `${sheetHeight + 14}px`,
+            transition: isDraggingSheet
+              ? 'none'
+              : 'bottom 0.32s cubic-bezier(0.18, 0.89, 0.32, 1.1)',
+          }}
+        >
+          {/* Traffic Toggle Button */}
+          <button
+            type="button"
+            onClick={() => setMobileTrafficEnabled(!mobileTrafficEnabled)}
+            className={`w-11 h-11 rounded-2xl shadow-lg border flex items-center justify-center transition-all active:scale-95 ${
+              mobileTrafficEnabled
+                ? 'bg-blue-600 text-white border-blue-500 shadow-blue-500/25'
+                : 'bg-white/95 backdrop-blur-md text-slate-700 border-slate-200/90'
+            }`}
+            title={mobileTrafficEnabled ? 'Hide Live Traffic Layer' : 'Show Live Traffic Layer'}
+          >
+            <Activity className="w-5 h-5" />
+          </button>
+
+          {/* Recenter / GPS Button */}
+          <button
+            type="button"
+            onClick={handleUseMyLocation}
+            disabled={isDetectingLocation}
+            className="w-11 h-11 bg-white/95 backdrop-blur-md rounded-2xl shadow-lg border border-slate-200/90 flex items-center justify-center text-slate-700 active:scale-95 transition-all disabled:opacity-50"
+            title="Locate GPS position"
+          >
+            {isDetectingLocation ? (
+              <Loader2 className="w-5 h-5 animate-spin text-blue-600" />
+            ) : (
+              <LocateFixed className="w-5 h-5 text-blue-600" />
+            )}
+          </button>
+        </div>
+
+        {/* 5. Bottom Floating Route Pill & Draggable Sheet (Lyft Transit Map style) */}
+        <div
+          className="absolute left-0 right-0 bottom-0 z-30 bg-white/98 backdrop-blur-xl rounded-t-3xl shadow-2xl border-t border-slate-200/90 flex flex-col overflow-hidden will-change-[height]"
+          style={{
+            height: `${sheetHeight}px`,
+            transition: isDraggingSheet
+              ? 'none'
+              : 'height 0.32s cubic-bezier(0.18, 0.89, 0.32, 1.1)',
+          }}
+        >
+          {/* Drag Handle Bar */}
+          <div
+            className="w-full pt-3 pb-1.5 cursor-grab active:cursor-grabbing flex flex-col items-center justify-center shrink-0 select-none touch-none"
+            onTouchStart={(e) => {
+              if (e.touches[0]) handleDragStart(e.touches[0].clientY);
+            }}
+            onTouchMove={(e) => {
+              if (e.touches[0]) handleDragMove(e.touches[0].clientY);
+            }}
+            onTouchEnd={(e) => {
+              if (e.changedTouches[0]) handleDragEnd(e.changedTouches[0].clientY);
+            }}
+            onMouseDown={(e) => handleDragStart(e.clientY)}
+            onClick={toggleSheet}
+          >
+            <div className="w-12 h-1.5 bg-slate-300 rounded-full" />
+          </div>
+
+          {/* Collapsed Pill Row (Lyft transit sequence) */}
+          <div
+            className="px-4 pb-2.5 cursor-pointer shrink-0 select-none touch-none"
+            onTouchStart={(e) => {
+              if (e.touches[0]) handleDragStart(e.touches[0].clientY);
+            }}
+            onTouchMove={(e) => {
+              if (e.touches[0]) handleDragMove(e.touches[0].clientY);
+            }}
+            onTouchEnd={(e) => {
+              if (e.changedTouches[0]) handleDragEnd(e.changedTouches[0].clientY);
+            }}
+            onMouseDown={(e) => handleDragStart(e.clientY)}
+            onClick={toggleSheet}
+          >
+            <div className="flex items-center justify-between p-2.5 rounded-2xl bg-slate-50 border border-slate-200/80 shadow-2xs">
+              <div className="flex items-center space-x-1.5 text-xs overflow-x-auto scrollbar-none py-0.5">
+                {/* Vehicle Pill */}
+                <span className="inline-flex items-center space-x-1 px-2.5 py-1 rounded-xl bg-white border border-slate-200 shadow-2xs font-bold text-slate-800 shrink-0">
+                  {(() => {
+                    const veh = VEHICLES.find((v) => v.type === vehicleType);
+                    const Icon = veh ? veh.icon : Car;
+                    return <Icon className="w-3.5 h-3.5 text-blue-600" />;
+                  })()}
+                  <span className="capitalize">{vehicleType}</span>
+                </span>
+
+                <span className="text-slate-400 font-bold text-xs shrink-0">›</span>
+
+                {/* Corridor Badge */}
+                <span className="inline-flex items-center space-x-1 px-2.5 py-1 rounded-xl bg-blue-100/90 border border-blue-200 font-bold text-blue-900 shrink-0">
+                  <RouteIcon className="w-3 h-3 text-blue-600" />
+                  <span className="truncate max-w-[120px]">
+                    {selectedCandidate?.name?.split('(')[0] || 'Corridor A'}
+                  </span>
+                </span>
+
+                <span className="text-slate-400 font-bold text-xs shrink-0">›</span>
+
+                {/* ETA & Distance */}
+                <span className="inline-flex items-center space-x-1 px-2.5 py-1 rounded-xl bg-emerald-100/90 border border-emerald-200 font-black text-emerald-900 shrink-0">
+                  <span>⏱️ {selectedCandidate?.travel_time_min || optimizationResult?.eta_minutes || 11}m</span>
+                  <span className="text-emerald-700 font-semibold">• {selectedCandidate?.distance_km || optimizationResult?.distance_km || 8.8}km</span>
+                </span>
+              </div>
+
+              <div className="flex items-center space-x-1 ml-2 text-slate-500 shrink-0">
+                <span className="text-[11px] font-bold text-blue-600 hidden sm:inline">Details</span>
+                <ChevronUp
+                  className={`w-4 h-4 text-slate-600 transition-transform duration-300 ${
+                    sheetHeight > PEEK_HEIGHT + 20 ? 'rotate-180' : ''
+                  }`}
+                />
+              </div>
+            </div>
+          </div>
+
+          {/* Expanded Bottom Sheet Content */}
+          <div
+            className={`flex-1 overflow-y-auto px-4 pb-6 space-y-4 transition-opacity duration-200 ${
+              sheetHeight > PEEK_HEIGHT + 15 ? 'opacity-100' : 'opacity-0 pointer-events-none'
+            }`}
+          >
+            {/* Route Summary Metrics */}
+            <div
+              className="flex items-center justify-between pt-1 cursor-grab active:cursor-grabbing select-none"
+              onTouchStart={(e) => {
+                if (e.touches[0]) handleDragStart(e.touches[0].clientY);
+              }}
+              onTouchMove={(e) => {
+                if (e.touches[0]) handleDragMove(e.touches[0].clientY);
+              }}
+              onTouchEnd={(e) => {
+                if (e.changedTouches[0]) handleDragEnd(e.changedTouches[0].clientY);
+              }}
+              onMouseDown={(e) => handleDragStart(e.clientY)}
+            >
+              <div>
+                <div className="text-2xl font-black text-slate-900">
+                  {selectedCandidate?.travel_time_min || optimizationResult?.eta_minutes || 11} min
+                </div>
+                <div className="text-xs text-slate-500 font-medium">
+                  {selectedCandidate?.distance_km || optimizationResult?.distance_km || 8.8} km • QPSO Optimized
+                </div>
+              </div>
+              <div className="text-right">
+                <span className="inline-flex items-center px-2.5 py-1 rounded-full text-xs font-bold bg-emerald-100 text-emerald-800">
+                  🟢 Free Flow
+                </span>
+              </div>
+            </div>
+
+              {/* Start Live Navigation Primary Action Button */}
+              <button
+                type="button"
+                onClick={() => navigate('/navigate')}
+                className="w-full bg-blue-600 hover:bg-blue-700 active:scale-[0.98] text-white font-extrabold py-3.5 px-4 rounded-2xl shadow-lg shadow-blue-500/25 flex items-center justify-center space-x-2 transition-all text-sm"
+              >
+                <Navigation className="w-4 h-4 text-white" />
+                <span>Start Navigation ({selectedCandidate?.travel_time_min || optimizationResult?.eta_minutes || 11} min)</span>
+                <ArrowRight className="w-4 h-4 text-blue-200" />
+              </button>
+
+              {/* Candidate Corridors Horizontal Carousel */}
+              <div>
+                <div className="text-xs font-bold text-slate-600 uppercase tracking-wide mb-2 flex items-center justify-between">
+                  <span>Corridor Options ({optimizationResult?.candidate_alternatives?.length || 1})</span>
+                  <span className="text-[10px] text-blue-600 font-semibold">QPSO Quantum Ranked</span>
+                </div>
+                <div className="flex space-x-2.5 overflow-x-auto pb-1 scrollbar-none">
+                  {optimizationResult?.candidate_alternatives?.map((cand) => {
+                    const isCandSelected = selectedCandidate?.id === cand.id;
+                    return (
+                      <div
+                        key={cand.id}
+                        onClick={() => setSelectedCandidate(cand)}
+                        className={`min-w-[170px] p-3 rounded-2xl border text-left cursor-pointer transition-all active:scale-95 ${
+                          isCandSelected
+                            ? 'bg-blue-50/90 border-blue-500 ring-2 ring-blue-400/40 shadow-xs'
+                            : 'bg-white border-slate-200 hover:border-slate-300'
+                        }`}
+                      >
+                        <div className="text-xs font-bold text-slate-800 truncate">{cand.name}</div>
+                        <div className="flex items-center justify-between mt-1 text-xs">
+                          <span className="font-extrabold text-blue-600">{cand.travel_time_min} min</span>
+                          <span className="text-slate-500 text-[11px]">{cand.distance_km} km</span>
+                        </div>
+                        <div className="mt-1 text-[10px] font-semibold text-slate-400">
+                          Fitness: {cand.composite_fitness}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+
+              {/* Vehicle Type Horizontal Selector */}
+              <div>
+                <div className="text-xs font-bold text-slate-600 uppercase tracking-wide mb-2">
+                  Vehicle Mode
+                </div>
+                <div className="flex space-x-2 overflow-x-auto pb-1 scrollbar-none">
+                  {VEHICLES.map((v) => {
+                    const Icon = v.icon;
+                    const isSelected = vehicleType === v.type;
+                    return (
+                      <button
+                        key={v.type}
+                        type="button"
+                        onClick={() => setVehicleType(v.type)}
+                        className={`flex items-center space-x-1.5 px-3 py-2 rounded-xl text-xs font-bold whitespace-nowrap transition-all border ${
+                          isSelected
+                            ? v.isEmergency
+                              ? 'bg-red-600 text-white border-red-600 shadow-sm'
+                              : 'bg-blue-600 text-white border-blue-600 shadow-sm'
+                            : 'bg-white text-slate-700 border-slate-200 hover:bg-slate-50'
+                        }`}
+                      >
+                        <Icon className="w-3.5 h-3.5" />
+                        <span>{v.label}</span>
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+
+              {/* Route Preference Horizontal Selector */}
+              <div>
+                <div className="text-xs font-bold text-slate-600 uppercase tracking-wide mb-2">
+                  Routing Preference
+                </div>
+                <div className="flex space-x-2 overflow-x-auto pb-1 scrollbar-none">
+                  {PREFERENCES.map((p) => {
+                    const isSelected = preference === p.key;
+                    return (
+                      <button
+                        key={p.key}
+                        type="button"
+                        onClick={() => setPreference(p.key)}
+                        className={`px-3 py-1.5 rounded-xl text-xs font-semibold whitespace-nowrap transition-all border ${
+                          isSelected
+                            ? 'bg-slate-900 text-white border-slate-900 shadow-sm font-bold'
+                            : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-50'
+                        }`}
+                      >
+                        {p.label}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+
+              {/* Turn Directions Summary */}
+              <div className="pt-2 border-t border-slate-100">
+                <div className="text-xs font-bold text-slate-700 mb-2">Key Waypoints</div>
+                <div className="space-y-2 text-xs text-slate-600">
+                  <div className="flex items-center space-x-2">
+                    <span className="w-2.5 h-2.5 rounded-full bg-emerald-500 shrink-0" />
+                    <span>Depart: <strong>{origin.name || 'Start Point'}</strong></span>
+                  </div>
+                  <div className="flex items-center space-x-2">
+                    <span className="w-2.5 h-2.5 rounded-full bg-blue-500 shrink-0" />
+                    <span>Via: <strong>{selectedCandidate?.name || 'Optimal Road Corridor'}</strong></span>
+                  </div>
+                  <div className="flex items-center space-x-2">
+                    <span className="w-2.5 h-2.5 rounded-full bg-rose-500 shrink-0" />
+                    <span>Arrive: <strong>{destination.name || 'Destination Point'}</strong></span>
+                  </div>
+                </div>
+              </div>
+            </div>
+        </div>
+
+        {/* 6. Mobile Route Search Modal / Sheet */}
+        {isMobileSearchOpen && (
+          <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-xs flex flex-col justify-end p-0">
+            <div className="bg-white rounded-t-3xl max-h-[92vh] flex flex-col overflow-hidden shadow-2xl">
+              {/* Header */}
+              <div className="p-4 border-b border-slate-100 flex items-center justify-between">
+                <h3 className="text-base font-bold text-slate-800 flex items-center space-x-2">
+                  <Compass className="w-5 h-5 text-blue-600" />
+                  <span>Plan Route</span>
+                </h3>
+                <button
+                  type="button"
+                  onClick={() => setIsMobileSearchOpen(false)}
+                  className="p-1.5 rounded-full hover:bg-slate-100 text-slate-500"
+                >
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
+
+              <div className="p-4 overflow-y-auto space-y-4">
+                {/* Inputs with Swap Button */}
+                <div className="space-y-3 relative">
+                  {/* Origin */}
+                  <div className="relative">
+                    <label className="text-[11px] font-bold text-slate-400 uppercase tracking-wider block mb-1">
+                      Origin (Start)
+                    </label>
+                    <div className="relative flex items-center">
+                      <span className="absolute left-3 w-3 h-3 rounded-full bg-emerald-500 ring-4 ring-emerald-100" />
+                      <input
+                        type="text"
+                        value={originQuery}
+                        onChange={(e) => {
+                          setOriginQuery(e.target.value);
+                          setShowOriginDropdown(true);
+                        }}
+                        onFocus={() => setShowOriginDropdown(true)}
+                        placeholder="Search origin address or landmark..."
+                        className="w-full pl-9 pr-10 py-2.5 text-xs bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500"
+                      />
+                      <button
+                        type="button"
+                        onClick={handleUseMyLocation}
+                        className="absolute right-2.5 text-blue-600 hover:text-blue-800"
+                        title="Use Current Location"
+                      >
+                        <LocateFixed className="w-4 h-4" />
+                      </button>
+                    </div>
+
+                    {/* Origin Autocomplete dropdown */}
+                    {showOriginDropdown && originSuggestions.length > 0 && (
+                      <div className="absolute left-0 right-0 mt-1 bg-white border border-slate-200 rounded-xl shadow-lg z-30 max-h-48 overflow-y-auto">
+                        {originSuggestions.map((item, idx) => (
+                          <div
+                            key={idx}
+                            onClick={() => {
+                              handleSelectOriginSuggestion(item);
+                              setShowOriginDropdown(false);
+                            }}
+                            className="p-2.5 text-xs hover:bg-blue-50 border-b border-slate-100 last:border-0 cursor-pointer flex items-center space-x-2"
+                          >
+                            <MapPin className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
+                            <span className="truncate text-slate-700 font-medium">{item.name}</span>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Swap Button */}
+                  <div className="flex justify-center -my-1">
+                    <button
+                      type="button"
+                      onClick={handleSwapPoints}
+                      className="p-1.5 rounded-full bg-slate-100 hover:bg-slate-200 text-slate-600 border border-slate-200 shadow-xs"
+                      title="Swap Origin and Destination"
+                    >
+                      <ArrowUpDown className="w-4 h-4" />
+                    </button>
+                  </div>
+
+                  {/* Destination */}
+                  <div className="relative">
+                    <label className="text-[11px] font-bold text-slate-400 uppercase tracking-wider block mb-1">
+                      Destination (End)
+                    </label>
+                    <div className="relative flex items-center">
+                      <span className="absolute left-3 w-3 h-3 rounded-full bg-rose-500 ring-4 ring-rose-100" />
+                      <input
+                        type="text"
+                        value={destQuery}
+                        onChange={(e) => {
+                          setDestQuery(e.target.value);
+                          setShowDestDropdown(true);
+                        }}
+                        onFocus={() => setShowDestDropdown(true)}
+                        placeholder="Search destination..."
+                        className="w-full pl-9 pr-4 py-2.5 text-xs bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500"
+                      />
+                    </div>
+
+                    {/* Destination Autocomplete dropdown */}
+                    {showDestDropdown && destSuggestions.length > 0 && (
+                      <div className="absolute left-0 right-0 mt-1 bg-white border border-slate-200 rounded-xl shadow-lg z-30 max-h-48 overflow-y-auto">
+                        {destSuggestions.map((item, idx) => (
+                          <div
+                            key={idx}
+                            onClick={() => {
+                              handleSelectDestSuggestion(item);
+                              setShowDestDropdown(false);
+                            }}
+                            className="p-2.5 text-xs hover:bg-rose-50 border-b border-slate-100 last:border-0 cursor-pointer flex items-center space-x-2"
+                          >
+                            <MapPin className="w-3.5 h-3.5 text-rose-600 shrink-0" />
+                            <span className="truncate text-slate-700 font-medium">{item.name}</span>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                </div>
+
+                {/* Quick Presets Chips */}
+                <div>
+                  <label className="text-[11px] font-bold text-slate-400 uppercase tracking-wider block mb-1.5">
+                    Quick Destination Presets ({activeRegionNotice})
+                  </label>
+                  <div className="grid grid-cols-2 gap-2">
+                    {presets.slice(0, 4).map((p, idx) => (
+                      <button
+                        key={idx}
+                        type="button"
+                        onClick={() => {
+                          setDestination(p.point);
+                          setDestQuery(p.point.name || p.label);
+                          setIsMobileSearchOpen(false);
+                        }}
+                        className="flex items-center space-x-2 p-2 rounded-xl border border-slate-200 bg-slate-50 hover:bg-blue-50 hover:border-blue-300 text-left text-xs transition-all"
+                      >
+                        <span className="p-1.5 rounded-lg bg-white shadow-2xs">
+                          {getCategoryIcon(p.category)}
+                        </span>
+                        <div className="truncate">
+                          <div className="font-bold text-slate-800 truncate">{p.label}</div>
+                          <div className="text-[10px] text-slate-400 truncate">{p.category}</div>
+                        </div>
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                {/* Apply Button */}
+                <button
+                  type="button"
+                  onClick={() => {
+                    setIsMobileSearchOpen(false);
+                    handleRunOptimization();
+                  }}
+                  className="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-3 px-4 rounded-xl text-xs flex items-center justify-center space-x-2 shadow-md"
+                >
+                  <Search className="w-4 h-4 text-white" />
+                  <span>Apply & Find Best Route</span>
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* 7. Mobile Slide-in Menu Drawer */}
+        {isMobileMenuOpen && (
+          <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-xs flex">
+            <div className="w-[82%] max-w-[320px] bg-white h-full shadow-2xl flex flex-col p-5">
+              {/* Header */}
+              <div className="flex items-center justify-between pb-4 border-b border-slate-100">
+                <div className="flex items-center space-x-2">
+                  <div className="w-8 h-8 rounded-xl bg-blue-600 text-white flex items-center justify-center font-black text-sm shadow-md">
+                    M
+                  </div>
+                  <div>
+                    <span className="font-black text-slate-900 tracking-tight text-base">MargSetu</span>
+                    <span className="text-[10px] font-bold text-blue-600 block -mt-1">Urban AI Corridor</span>
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setIsMobileMenuOpen(false)}
+                  className="p-1.5 rounded-full hover:bg-slate-100 text-slate-500"
+                >
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
+
+              <div className="flex-1 overflow-y-auto py-4 space-y-5">
+                {/* City Hub Switcher */}
+                <div>
+                  <label className="text-[11px] font-bold text-slate-400 uppercase tracking-wider block mb-2">
+                    Switch Regional Hub
+                  </label>
+                  <div className="grid grid-cols-2 gap-1.5">
+                    {CITY_PROFILES.map((city) => (
+                      <button
+                        key={city.id}
+                        type="button"
+                        onClick={() => {
+                          handleSelectCity(city.id);
+                          setIsMobileMenuOpen(false);
+                        }}
+                        className={`text-xs px-2.5 py-2 rounded-xl font-bold transition-all text-left truncate ${
+                          selectedCityId === city.id
+                            ? 'bg-blue-600 text-white shadow-sm'
+                            : 'bg-slate-50 text-slate-700 hover:bg-slate-100 border border-slate-200'
+                        }`}
+                      >
+                        {city.cityName}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                {/* Navigation Links */}
+                <div>
+                  <label className="text-[11px] font-bold text-slate-400 uppercase tracking-wider block mb-2">
+                    Navigation & Modules
+                  </label>
+                  <div className="space-y-1">
+                    {[
+                      { path: '/navigate', label: 'Navigation HUD', icon: Navigation },
+                      { path: '/traffic', label: 'Traffic Analytics', icon: Activity },
+                      { path: '/emergency', label: 'Emergency Command', icon: Siren },
+                      { path: '/vehicles', label: 'Vehicle Fleet', icon: Car },
+                      { path: '/optimization', label: 'QPSO Visualizer', icon: Zap },
+                      { path: '/benchmark', label: 'Benchmark Suite', icon: TrendingDown },
+                      { path: '/settings', label: 'Settings', icon: Compass }
+                    ].map((item) => {
+                      const Icon = item.icon;
+                      return (
+                        <button
+                          key={item.path}
+                          type="button"
+                          onClick={() => {
+                            navigate(item.path);
+                            setIsMobileMenuOpen(false);
+                          }}
+                          className="w-full flex items-center space-x-3 px-3 py-2.5 rounded-xl hover:bg-slate-50 text-slate-700 text-xs font-semibold transition-all text-left"
+                        >
+                          <Icon className="w-4 h-4 text-slate-500" />
+                          <span>{item.label}</span>
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+              </div>
+            </div>
+            {/* Backdrop Dismiss */}
+            <div className="flex-1" onClick={() => setIsMobileMenuOpen(false)} />
+          </div>
+        )}
+      </div>
+    );
+  }
+
+  // =========================================================================
+  // LAPTOP / DESKTOP VIEW: Existing Two-Column Layout (100% Intact & Untouched)
+  // =========================================================================
   return (
     <div className="min-h-screen bg-slate-50 flex flex-col font-sans">
       <NavigationNavbar />
