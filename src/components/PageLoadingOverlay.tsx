@@ -25,8 +25,28 @@ const ROUTE_SUBTITLES: Record<string, string> = {
   '/admin': 'Connecting to Master Traffic Command Center...',
 };
 
+function useIsMobileDevice() {
+  const [isMobile, setIsMobile] = useState<boolean>(() => {
+    if (typeof window === 'undefined') return false;
+    const isMobileDevice = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
+    return isMobileDevice || window.innerWidth < 768;
+  });
+
+  useEffect(() => {
+    const handleResize = () => {
+      const isMobileDevice = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
+      setIsMobile(isMobileDevice || window.innerWidth < 768);
+    };
+    window.addEventListener('resize', handleResize);
+    return () => window.removeEventListener('resize', handleResize);
+  }, []);
+
+  return isMobile;
+}
+
 export default function PageLoadingOverlay() {
   const location = useLocation();
+  const isMobile = useIsMobileDevice();
   const { isGlobalLoading, globalLoadingMessage, hideGlobalLoader } = useApp();
 
   const [visible, setVisible] = useState(true); // Start true for "loading effect at the starting"
@@ -121,12 +141,18 @@ export default function PageLoadingOverlay() {
       className={`fixed inset-0 z-[9999] flex items-center justify-center p-4 transition-all duration-300 ${
         animatingOut
           ? 'opacity-0 backdrop-blur-none pointer-events-none'
+          : isMobile
+          ? 'opacity-100 backdrop-blur-md'
           : 'opacity-100 backdrop-blur-2xl'
       }`}
       style={{
-        backgroundColor: animatingOut ? 'transparent' : 'rgba(10, 17, 36, 0.72)',
-        backdropFilter: animatingOut ? 'none' : 'blur(20px)',
-        WebkitBackdropFilter: animatingOut ? 'none' : 'blur(20px)',
+        backgroundColor: animatingOut
+          ? 'transparent'
+          : isMobile
+          ? 'rgba(10, 17, 36, 0.58)'
+          : 'rgba(10, 17, 36, 0.72)',
+        backdropFilter: animatingOut ? 'none' : isMobile ? 'blur(10px)' : 'blur(20px)',
+        WebkitBackdropFilter: animatingOut ? 'none' : isMobile ? 'blur(10px)' : 'blur(20px)',
       }}
       onClick={() => {
         // Allow user to click to dismiss if waiting
@@ -139,7 +165,11 @@ export default function PageLoadingOverlay() {
     >
       {/* Pop Container Card with elastic spring entry */}
       <div
-        className={`relative max-w-sm w-full bg-white/95 dark:bg-slate-900/95 backdrop-blur-2xl rounded-3xl p-8 border border-white/30 dark:border-cyan-500/30 shadow-2xl flex flex-col items-center justify-center transform transition-all duration-300 ${
+        className={`relative ${
+          isMobile
+            ? 'max-w-[250px] w-auto p-4 rounded-2xl'
+            : 'max-w-[280px] w-auto p-6 rounded-3xl'
+        } bg-white/95 dark:bg-slate-900/95 backdrop-blur-2xl border border-white/30 dark:border-cyan-500/30 shadow-2xl flex flex-col items-center justify-center transform transition-all duration-300 ${
           animatingOut ? 'scale-95 opacity-0' : 'animate-loader-pop'
         }`}
         onClick={(e) => e.stopPropagation()}
@@ -149,11 +179,14 @@ export default function PageLoadingOverlay() {
           size="md"
           message={message}
           subMessage={subMessage}
-          showSmoke={true}
         />
 
         {/* Small subtle badge at bottom */}
-        <div className="mt-4 flex items-center gap-1.5 px-3 py-1 rounded-full bg-cyan-500/10 border border-cyan-500/20 text-[10px] font-semibold text-cyan-700 dark:text-cyan-300 uppercase tracking-wider">
+        <div
+          className={`${
+            isMobile ? 'mt-3 text-[9px] px-2.5 py-0.5' : 'mt-3.5 text-[10px] px-3 py-1'
+          } flex items-center gap-1.5 rounded-full bg-cyan-500/10 border border-cyan-500/20 font-semibold text-cyan-700 dark:text-cyan-300 uppercase tracking-wider`}
+        >
           <span className="w-1.5 h-1.5 rounded-full bg-cyan-400 animate-ping" />
           Smart Mobility Grid Active
         </div>

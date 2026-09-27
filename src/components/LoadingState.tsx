@@ -12,12 +12,11 @@ export default function LoadingState({
   size = 'md',
 }: LoadingStateProps) {
   return (
-    <div className="flex flex-col items-center justify-center py-12 animate-fade-in">
+    <div className="flex flex-col items-center justify-center py-5 sm:py-12 animate-fade-in">
       <CarLoadingSpinner
         size={size}
         message={message}
         subMessage={subMessage}
-        showSmoke={true}
       />
     </div>
   );
